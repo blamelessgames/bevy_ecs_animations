@@ -25,10 +25,29 @@ fn startup(
     ));
 
     commands.spawn((
+        PointLight {
+            color: DEEP_PINK.into(),
+            intensity: 100_000.0,
+            ..default()
+        },
+        Transform::from_translation(vec3(2.0, 2.0, 2.0)).looking_at(Vec3::ZERO, Dir3::Y),
+    ));
+
+    commands.spawn((
+        PointLight {
+            color: REBECCA_PURPLE.into(),
+            intensity: 100_000.0,
+            ..default()
+        },
+        Transform::from_translation(vec3(-2.0, -2.0, -2.0)).looking_at(Vec3::ZERO, Dir3::Y),
+    ));
+
+    commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: GOLDENROD.into(),
-            unlit: true,
+            metallic: 1.0,
+            clearcoat: 1.0,
             ..default()
         })),
         Spinner,
@@ -50,7 +69,7 @@ impl Spinner {
         ScaledTime::new(
             0.0,
             120.0,
-            ScaledOutput::new(-PI, PI, EaseFunction::CircularInOut),
+            ScaledOutput::new(TAU * -20.0, TAU * 20.0, EaseFunction::CircularInOut),
         )
     }
 }
@@ -72,6 +91,6 @@ impl EntityAnimation for Spinner {
         let axis = Dir3::Y
             .rotate_z(Spinner::axis_curve().sample_unchecked(t))
             .normalize();
-        transform.rotate_axis(Dir3::new_unchecked(axis), dt * 10.0);
+        transform.rotate_axis(Dir3::new_unchecked(axis), dt * 2.0);
     }
 }

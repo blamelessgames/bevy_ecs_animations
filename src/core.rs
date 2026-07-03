@@ -25,63 +25,66 @@ impl<A> Default for EntityAnimationPlugin<A> {
     }
 }
 
-impl<A: EntityAnimation + Send + Sync + 'static> Plugin for EntityAnimationPlugin<A> {
+impl<A: EntityAnimation> Plugin for EntityAnimationPlugin<A> {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            A::schedule(),
-            |mut animations: Query<(Entity, &mut A, &mut EntityAnimationState<A>)>,
-             mut animated_components: Query<A::QueryData, A::QueryFilter>,
-             mut commands: Commands,
-             time: Res<Time>| {
-                for (entity, mut animation, mut state) in animations.iter_mut() {
-                    if state.finished {
-                        continue;
-                    }
-                    let repeat = state.repeat;
-                    state.tick(
-                        &time,
-                        entity,
-                        &mut *animation,
-                        animated_components.reborrow(),
-                    );
-
-                    if repeat != state.repeat {
-                        commands.entity(entity).trigger(EntityAnimationRepeated);
-                    }
-
-                    if state.finished {
-                        commands.entity(entity).trigger(EntityAnimationFinished);
-                        if animation.remove_on_finish() {
-                            // the on remove handler will fix this!
-                            commands.entity(entity).remove::<A>();
-                        }
-                    }
-                }
-            },
-        )
-        .add_observer(
-            |state: On<Add, A>, mut commands: Commands, new_animation: Query<&A>| {
-                let new_animation = new_animation.get(state.entity).expect(
-                    "should be unreachable in fact, this is literally the observer on add!",
-                );
-                // this serves as the initialization phase and multiple animations can be queued
-                // up on a single entity since the state is type-specific, which is impossible
-                // to express in a require from what i can tell
-                commands.entity(state.entity).insert(EntityAnimationState {
-                    elapsed: new_animation.skip(),
-                    repeat: new_animation.repeat(),
-                    finished: false,
-                    paused: new_animation.start_paused(),
-                    _marker: PhantomData::<A>,
-                });
-            },
-        )
-        .add_observer(|state: On<Remove, A>, mut commands: Commands| {
-            commands
-                .entity(state.entity)
-                .remove::<EntityAnimationState<A>>();
-        });
+        app.add_systems(A::schedule(), tick::<A>)
+            .add_observer(on_add::<A>)
+            .add_observer(on_remove::<A>);
     }
+}
+
+fn tick<A: EntityAnimation>(
+    mut animations: Query<(Entity, &mut A, &mut EntityAnimationState<A>)>,
+    mut animated_components: Query<A::QueryData, A::QueryFilter>,
+    mut commands: Commands,
+    time: Res<Time>,
+) {
+    for (entity, mut animation, mut state) in animations.iter_mut() {
+        if state.finished {
+            continue;
+        }
+        let repeat = state.repeat;
+        state.tick(
+            &time,
+            entity,
+            &mut *animation,
+            animated_components.reborrow(),
+        );
+
+        if repeat != state.repeat {
+            commands.entity(entity).trigger(EntityAnimationRepeated);
+        }
+
+        if state.finished {
+            commands.entity(entity).trigger(EntityAnimationFinished);
+            if animation.remove_on_finish() {
+                // the on remove handler will fix this!
+                commands.entity(entity).remove::<A>();
+            }
+        }
+    }
+}
+
+fn on_add<A: EntityAnimation>(state: On<Add, A>, mut commands: Commands, new_animation: Query<&A>) {
+    let new_animation = new_animation
+        .get(state.entity)
+        .expect("should be unreachable in fact, this is literally the observer on add!");
+    // this serves as the initialization phase and multiple animations can be queued
+    // up on a single entity since the state is type-specific, which is impossible
+    // to express in a require from what i can tell
+    commands.entity(state.entity).insert(EntityAnimationState {
+        elapsed: new_animation.skip(),
+        repeat: new_animation.repeat(),
+        finished: false,
+        paused: new_animation.start_paused(),
+        _marker: PhantomData::<A>,
+    });
+}
+
+fn on_remove<A: EntityAnimation>(state: On<Remove, A>, mut commands: Commands) {
+    commands
+        .entity(state.entity)
+        .remove::<EntityAnimationState<A>>();
 }
 
 #[derive(SystemParam)]
@@ -157,7 +160,6 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
 }
 
 pub trait EntityAnimation: Component<Mutability = Mutable> {
-    // i want this to be a system param!
     type QueryData: QueryData;
     type QueryFilter: QueryFilter;
 
