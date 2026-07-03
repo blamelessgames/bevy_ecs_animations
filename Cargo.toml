@@ -22,3 +22,6 @@ libm = [
 nostd-libm = [
     "bevy_math/nostd-libm"
 ]
+
+[dev-dependencies]
+bevy = "0.19.0"
