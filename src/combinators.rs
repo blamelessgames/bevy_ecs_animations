@@ -3,7 +3,26 @@ use std::{
     ops::{Add, Mul, Sub},
 };
 
+use bevy_ecs::component::Component;
 use bevy_math::{Curve, FloatExt, curve::Interval};
+
+// common case helper
+#[derive(Component)]
+pub struct Animation<O, M>(Box<dyn Curve<O>>, PhantomData<M>);
+
+impl<O, M> Animation<O, M> {
+    pub fn new(curve: impl Curve<O> + Send + Sync + 'static) -> Animation<O, M> {
+        Self(Box::new(curve), PhantomData)
+    }
+}
+
+impl<O, M> std::ops::Deref for Animation<O, M> {
+    type Target = dyn Curve<O>;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
 
 // follows one curve with the next. not sure if we want to
 // adjust the second's domain to the end of the first, i.e. require it
@@ -276,6 +295,7 @@ where
 
 #[test]
 fn test_combinators() {
+    // i'm not sure if any of this is useful tbh
     use bevy_math::prelude::*;
     const fn crazy() -> impl Curve<(Vec3, Vec4)> {
         zip(
@@ -312,7 +332,10 @@ fn test_combinators() {
     }
 
     let c = crazy();
-    for t in c.domain().spaced_points(100).unwrap() {
+    assert_eq!(c.domain().start(), 0.0);
+    assert_eq!(c.domain().end(), 2.0);
+    // 60 frames a second oughta be enough for anyone
+    for t in c.domain().spaced_points(120).unwrap() {
         println!("{:?}", c.sample_unchecked(t));
     }
 }

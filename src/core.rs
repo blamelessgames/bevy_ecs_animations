@@ -47,6 +47,7 @@ fn tick<A: EntityAnimation>(
         let repeat = state.repeat;
         state.tick(
             &time,
+            commands.reborrow(),
             entity,
             &mut *animation,
             animated_components.reborrow(),
@@ -113,13 +114,31 @@ impl<'w, 's, A: EntityAnimation> EntityAnimationController<'w, 's, A> {
             .map(|(state, _)| state.paused)
     }
 
-    pub fn change_pause(&mut self, entity: Entity, paused: bool) -> Option<bool> {
+    pub fn flip_pause(&mut self, entity: Entity, paused: bool) -> Option<bool> {
         let Ok((mut state, _)) = self.animations.get_mut(entity) else {
             return None;
         };
         let old = state.paused;
         state.paused = paused;
         Some(old)
+    }
+
+    pub fn flip_pause_all(&mut self) {
+        for (mut state, _) in &mut self.animations {
+            state.paused = !state.paused;
+        }
+    }
+
+    pub fn pause_all(&mut self) {
+        for (mut state, _) in &mut self.animations {
+            state.paused = true;
+        }
+    }
+
+    pub fn unpause_all(&mut self) {
+        for (mut state, _) in &mut self.animations {
+            state.paused = false;
+        }
     }
 }
 
@@ -142,6 +161,7 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
     fn tick(
         &mut self,
         time: &Time,
+        mut commands: Commands,
         entity: Entity,
         animation: &mut A,
         mut animated_components: Query<A::QueryData, A::QueryFilter>,
@@ -154,6 +174,7 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
         animation.tick(
             self.elapsed,
             time.delta_secs(),
+            commands.reborrow(),
             entity,
             animated_components.reborrow(),
         );
@@ -166,7 +187,11 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
 }
 
 pub trait EntityAnimation: Component<Mutability = Mutable> {
+    /// define the query you're passed. i tried to go full system param
+    /// but it's hard!
     type QueryData: QueryData;
+
+    /// filter the query, () if you don't need one
     type QueryFilter: QueryFilter;
 
     /// schedule to update the animation. probably Update is fine but change it if you need
@@ -205,12 +230,14 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
         true
     }
 
-    /// called every invocation of the schedule with the t from 0.0->duration, the delta t
-    /// the entity this animation is on, and the query. maybe soon to a system param dangit
+    /// called every invocation of the schedule with the t from 0.0->duration and dt of the
+    /// current frame
+    /// commands can be used to do whatever
     fn tick(
         &mut self,
         t: f32,
         dt: f32,
+        commands: Commands,
         entity: Entity,
         components: Query<Self::QueryData, Self::QueryFilter>,
     );
