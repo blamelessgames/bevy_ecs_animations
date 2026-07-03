@@ -14,18 +14,25 @@ fn main() -> AppExit {
             EntityAnimationPlugin::<Spin>::default(),
         ))
         .add_systems(Startup, startup)
-        .add_systems(PreUpdate, pauser)
+        .add_systems(PreUpdate, input)
         .run()
 }
 
-fn pauser(
+fn input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut spin_controller: EntityAnimationController<Spin>,
     mut wobble_controller: EntityAnimationController<Wobble>,
+    mut config_store: ResMut<GizmoConfigStore>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
         spin_controller.flip_pause_all();
         wobble_controller.flip_pause_all();
+    }
+    if keyboard.just_pressed(KeyCode::KeyG) {
+        let (_, light_config) = config_store.config_mut::<LightGizmoConfigGroup>();
+        // watch the lights move too!
+        light_config.draw_all = !light_config.draw_all;
+        light_config.color = LightGizmoColor::MatchLightColor;
     }
 }
 
@@ -33,12 +40,7 @@ fn startup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut config_store: ResMut<GizmoConfigStore>,
 ) {
-    let (_, light_config) = config_store.config_mut::<LightGizmoConfigGroup>();
-    light_config.draw_all = false;
-    light_config.color = LightGizmoColor::MatchLightColor;
-
     commands.spawn((
         Camera3d::default(),
         Camera {
@@ -87,7 +89,7 @@ fn startup(
     commands.spawn((
         Mesh3d(meshes.add(Capsule3d::new(1.0, 1.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: WHITE.into(),
+            base_color: WHITE_SMOKE.into(),
             metallic: 0.9,
             perceptual_roughness: 0.2,
 
@@ -129,7 +131,8 @@ impl EntityAnimation for Spin {
         let Ok(mut transform) = components.get_mut(entity) else {
             return;
         };
-        // you don't even need a curve if you want to be fun
+        // you don't need to use a curve
+        // obviously there are about 50 ways to achieve this same animation
         let new = (Rot2::radians(dt * 0.5) * transform.translation.xy()).normalize();
         *transform = Transform::from_translation(new.extend(3.0)).looking_at(Vec3::ZERO, Vec3::Y);
     }
