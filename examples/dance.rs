@@ -1,7 +1,7 @@
 use std::f32::consts::*;
 
 use bevy::{color::palettes::css::*, prelude::*};
-use bevy_ecs_animations::{EntityAnimation, EntityAnimationPlugin, ScaledOutput, ScaledTime};
+use bevy_ecs_animations::{EntityAnimation, EntityAnimationPlugin, scaled_domain, scaled_output};
 
 fn main() -> AppExit {
     App::new()
@@ -62,14 +62,17 @@ impl Spinner {
     // `impl Curve<T>` you can ensure cheap inline construction
     // in the tick function, saving the trouble of trying to write
     // the insane types combinators will produce
+
+    // of course the bevy curve combinators also work just fine
+    // if you use other approaches.
     const fn axis_curve() -> impl Curve<f32> {
         // adapt a curve using combinators.
         // the domain of the curve is the timeline
         // the output of the curve is whatever you want it to be really
-        ScaledTime::new(
+        scaled_domain(
             0.0,
             120.0,
-            ScaledOutput::new(TAU * -20.0, TAU * 20.0, EaseFunction::CircularInOut),
+            scaled_output(TAU * -20.0, TAU * 20.0, EaseFunction::CircularInOut),
         )
     }
 }
