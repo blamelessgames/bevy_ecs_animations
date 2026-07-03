@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Mul};
 
 use bevy_math::{Curve, FloatExt, curve::Interval};
 
@@ -165,49 +165,42 @@ impl<T, C: Curve<T>> Curve<T> for ScaledTime<T, C> {
     }
 }
 
-pub enum Function {
-    Sin,
-    Cos,
-}
-
-impl Function {
-    fn call(&self, t: f32) -> f32 {
-        match self {
-            Function::Sin => f32::sin(t),
-            Function::Cos => f32::cos(t),
-        }
-    }
-}
-
-pub struct FunctionCurve {
+pub struct FnCurve<Func, O> {
     duration: f32,
     low: f32,
     high: f32,
-    f: Function,
+    function: Func,
     magnitude: f32,
+    _marker: PhantomData<O>,
 }
 
-impl From<(f32, f32, f32, Function, f32)> for FunctionCurve {
-    fn from((duration, low, high, f, magnitude): (f32, f32, f32, Function, f32)) -> Self {
-        debug_assert!(duration > 0.0 && high > low && magnitude > 0.0);
-        Self {
+impl<Func, O> FnCurve<Func, O>
+where
+    Func: Fn(f32) -> O,
+    O: Mul<f32, Output = O>,
+{
+    pub const fn new(duration: f32, low: f32, high: f32, function: Func, magnitude: f32) -> Self {
+        FnCurve {
             duration,
             low,
             high,
-            f,
+            function,
             magnitude,
+            _marker: PhantomData,
         }
     }
 }
 
-impl Curve<f32> for FunctionCurve {
+impl<Func, O> Curve<O> for FnCurve<Func, O>
+where
+    Func: Fn(f32) -> O,
+    O: Mul<f32, Output = O>,
+{
     fn domain(&self) -> Interval {
         Interval::new(0.0, self.duration).unwrap()
     }
 
-    fn sample_unchecked(&self, t: f32) -> f32 {
-        self.f
-            .call(((t / self.duration) * (self.high - self.low)) + self.low)
-            * self.magnitude
+    fn sample_unchecked(&self, t: f32) -> O {
+        (self.function)(((t / self.duration) * (self.high - self.low)) + self.low) * self.magnitude
     }
 }

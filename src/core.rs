@@ -10,6 +10,7 @@ use bevy_ecs::{
     query::{QueryData, QueryFilter},
     schedule::ScheduleLabel,
     system::{Commands, Query, Res, SystemParam},
+    world::EntityWorldMut,
 };
 use bevy_time::Time;
 
@@ -58,8 +59,11 @@ fn tick<A: EntityAnimation>(
         if state.finished {
             commands.entity(entity).trigger(EntityAnimationFinished);
             if animation.remove_on_finish() {
-                // the on remove handler will fix this!
-                commands.entity(entity).remove::<A>();
+                commands
+                    .entity(entity)
+                    .queue_silenced(|mut entity: EntityWorldMut| {
+                        entity.remove::<A>();
+                    });
             }
         }
     }
@@ -84,7 +88,9 @@ fn on_add<A: EntityAnimation>(state: On<Add, A>, mut commands: Commands, new_ani
 fn on_remove<A: EntityAnimation>(state: On<Remove, A>, mut commands: Commands) {
     commands
         .entity(state.entity)
-        .remove::<EntityAnimationState<A>>();
+        .queue_silenced(|mut entity: EntityWorldMut| {
+            entity.remove::<EntityAnimationState<A>>();
+        });
 }
 
 #[derive(SystemParam)]
