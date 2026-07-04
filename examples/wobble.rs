@@ -2,8 +2,8 @@ use std::f32::consts::*;
 
 use bevy::{color::palettes::css::*, prelude::*};
 use bevy_ecs_animations::{
-    EntityAnimation, EntityAnimationController, EntityAnimationPlugin, map, scaled_domain,
-    scaled_output,
+    AnimationControl, EntityAnimation, EntityAnimationPlugin, EntityAnimationRepeated, map,
+    scaled_domain, scaled_output,
 };
 
 fn main() -> AppExit {
@@ -20,13 +20,11 @@ fn main() -> AppExit {
 
 fn input(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut spin_controller: EntityAnimationController<Spin>,
-    mut wobble_controller: EntityAnimationController<Wobble>,
+    mut commands: Commands,
     mut config_store: ResMut<GizmoConfigStore>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
-        spin_controller.flip_pause_all();
-        wobble_controller.flip_pause_all();
+        commands.flip_pause_all::<Wobble>().flip_pause_all::<Spin>();
     }
     if keyboard.just_pressed(KeyCode::KeyG) {
         let (_, light_config) = config_store.config_mut::<LightGizmoConfigGroup>();
@@ -50,14 +48,18 @@ fn startup(
         Transform::from_translation(vec3(0.0, 0.0, 10.0)).looking_at(Vec3::ZERO, Dir3::Y),
     ));
 
-    commands.spawn((
-        DirectionalLight {
-            color: DEEP_PINK.into(),
-            ..default()
-        },
-        Transform::from_translation(vec3(2.0, 2.0, 0.0)).looking_at(Vec3::ZERO, Dir3::Y),
-        Spin,
-    ));
+    commands
+        .spawn((
+            DirectionalLight {
+                color: DEEP_PINK.into(),
+                ..default()
+            },
+            Transform::from_translation(vec3(2.0, 2.0, 0.0)).looking_at(Vec3::ZERO, Dir3::Y),
+            Spin,
+        ))
+        .observe(|_: On<EntityAnimationRepeated>| {
+            println!("repeat!");
+        });
 
     commands.spawn((
         DirectionalLight {

@@ -8,184 +8,13 @@ use bevy_ecs::{
     lifecycle::{Add, Remove},
     observer::On,
     query::{QueryData, QueryFilter},
-    schedule::ScheduleLabel,
+    schedule::{IntoScheduleConfigs, ScheduleLabel},
     system::{Commands, Query, Res, SystemParam},
-    world::EntityWorldMut,
+    world::{EntityWorldMut, World},
 };
 use bevy_time::Time;
 
-pub struct EntityAnimationPlugin<A> {
-    _marker: PhantomData<A>,
-}
-
-impl<A> Default for EntityAnimationPlugin<A> {
-    fn default() -> Self {
-        EntityAnimationPlugin {
-            _marker: Default::default(),
-        }
-    }
-}
-
-impl<A: EntityAnimation> Plugin for EntityAnimationPlugin<A> {
-    fn build(&self, app: &mut App) {
-        app.add_systems(A::schedule(), tick::<A>)
-            .add_observer(on_add::<A>)
-            .add_observer(on_remove::<A>);
-    }
-}
-
-fn tick<A: EntityAnimation>(
-    mut animations: Query<(Entity, &mut A, &mut EntityAnimationState<A>)>,
-    mut animated_components: Query<A::QueryData, A::QueryFilter>,
-    mut commands: Commands,
-    time: Res<Time>,
-) {
-    for (entity, mut animation, mut state) in animations.iter_mut() {
-        if state.finished {
-            continue;
-        }
-        let repeat = state.repeat;
-        state.tick(
-            &time,
-            commands.reborrow(),
-            entity,
-            &mut *animation,
-            animated_components.reborrow(),
-        );
-
-        if repeat != state.repeat {
-            commands.entity(entity).trigger(EntityAnimationRepeated);
-        }
-
-        if state.finished {
-            commands.entity(entity).trigger(EntityAnimationFinished);
-            if animation.remove_on_finish() {
-                commands
-                    .entity(entity)
-                    .queue_silenced(|mut entity: EntityWorldMut| {
-                        entity.remove::<A>();
-                    });
-            }
-        }
-    }
-}
-
-fn on_add<A: EntityAnimation>(state: On<Add, A>, mut commands: Commands, new_animation: Query<&A>) {
-    let new_animation = new_animation
-        .get(state.entity)
-        .expect("should be unreachable in fact, this is literally the observer on add!");
-    // this serves as the initialization phase and multiple animations can be queued
-    // up on a single entity since the state is type-specific, which is impossible
-    // to express in a require from what i can tell
-    commands.entity(state.entity).insert(EntityAnimationState {
-        elapsed: new_animation.skip(),
-        repeat: new_animation.repeat(),
-        finished: false,
-        paused: new_animation.start_paused(),
-        _marker: PhantomData::<A>,
-    });
-}
-
-fn on_remove<A: EntityAnimation>(state: On<Remove, A>, mut commands: Commands) {
-    commands
-        .entity(state.entity)
-        .queue_silenced(|mut entity: EntityWorldMut| {
-            entity.remove::<EntityAnimationState<A>>();
-        });
-}
-
-#[derive(SystemParam)]
-pub struct EntityAnimationController<'w, 's, A: EntityAnimation> {
-    animations: Query<'w, 's, (&'static mut EntityAnimationState<A>, &'static mut A)>,
-}
-
-impl<'w, 's, A: EntityAnimation> EntityAnimationController<'w, 's, A> {
-    pub fn is_finished(&self, entity: Entity) -> Option<bool> {
-        self.animations
-            .get(entity)
-            .ok()
-            .map(|(state, _)| state.finished)
-    }
-
-    pub fn is_paused(&self, entity: Entity) -> Option<bool> {
-        self.animations
-            .get(entity)
-            .ok()
-            .map(|(state, _)| state.paused)
-    }
-
-    pub fn flip_pause(&mut self, entity: Entity, paused: bool) -> Option<bool> {
-        let Ok((mut state, _)) = self.animations.get_mut(entity) else {
-            return None;
-        };
-        let old = state.paused;
-        state.paused = paused;
-        Some(old)
-    }
-
-    pub fn flip_pause_all(&mut self) {
-        for (mut state, _) in &mut self.animations {
-            state.paused = !state.paused;
-        }
-    }
-
-    pub fn pause_all(&mut self) {
-        for (mut state, _) in &mut self.animations {
-            state.paused = true;
-        }
-    }
-
-    pub fn unpause_all(&mut self) {
-        for (mut state, _) in &mut self.animations {
-            state.paused = false;
-        }
-    }
-}
-
-#[derive(EntityEvent)]
-pub struct EntityAnimationFinished(Entity);
-
-#[derive(EntityEvent)]
-pub struct EntityAnimationRepeated(Entity);
-
-#[derive(Component, Default)]
-struct EntityAnimationState<A> {
-    elapsed: f32,
-    repeat: u32, // 4 billion repetitions ought to be enough for anyone
-    finished: bool,
-    paused: bool,
-    _marker: PhantomData<A>,
-}
-
-impl<A: EntityAnimation> EntityAnimationState<A> {
-    fn tick(
-        &mut self,
-        time: &Time,
-        mut commands: Commands,
-        entity: Entity,
-        animation: &mut A,
-        mut animated_components: Query<A::QueryData, A::QueryFilter>,
-    ) {
-        if self.paused || self.finished {
-            return;
-        }
-
-        self.elapsed = (self.elapsed + time.delta_secs()).clamp(0.0, animation.duration());
-        animation.tick(
-            self.elapsed,
-            time.delta_secs(),
-            commands.reborrow(),
-            entity,
-            animated_components.reborrow(),
-        );
-        if self.elapsed >= animation.duration() && self.repeat > 0 {
-            self.repeat -= 1;
-            self.elapsed = 0.0;
-        }
-        self.finished = self.elapsed >= animation.duration() && self.repeat == 0;
-    }
-}
-
+/// implement this trait to
 pub trait EntityAnimation: Component<Mutability = Mutable> {
     /// define the query you're passed. i tried to go full system param
     /// but it's hard!
@@ -241,4 +70,368 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
         entity: Entity,
         components: Query<Self::QueryData, Self::QueryFilter>,
     );
+}
+
+/// Command interface to control animations commands-style. if you want something
+/// more immediate, use AnimationController as a system parameter
+pub trait AnimationControl {
+    fn restart<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self;
+
+    fn restart_all<A: EntityAnimation>(&mut self) -> &mut Self;
+
+    fn flip_pause<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self;
+
+    fn pause<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self;
+
+    fn unpause<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self;
+
+    fn flip_pause_all<A: EntityAnimation>(&mut self) -> &mut Self;
+
+    fn pause_all<A: EntityAnimation>(&mut self) -> &mut Self;
+
+    fn unpause_all<A: EntityAnimation>(&mut self) -> &mut Self;
+}
+
+pub struct EntityAnimationPlugin<A> {
+    _marker: PhantomData<A>,
+}
+
+impl<A: EntityAnimation> Default for EntityAnimationPlugin<A> {
+    fn default() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<A: EntityAnimation> Plugin for EntityAnimationPlugin<A> {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            A::schedule(),
+            (
+                EntityAnimationPlugin::<A>::tick,
+                EntityAnimationPlugin::<A>::ticked,
+            )
+                .chain(),
+        )
+        .add_observer(on_add::<A>)
+        .add_observer(on_remove::<A>);
+    }
+}
+
+impl<A: EntityAnimation> EntityAnimationPlugin<A> {
+    /// system that runs immediately after this plugin instance's tick system,
+    /// exposed for ordering
+    pub fn ticked() {}
+
+    fn tick(
+        mut animations: Query<(Entity, &mut A, &mut EntityAnimationState<A>)>,
+        mut animated_components: Query<A::QueryData, A::QueryFilter>,
+        mut commands: Commands,
+        time: Res<Time>,
+    ) {
+        for (entity, mut animation, mut state) in animations.iter_mut() {
+            if state.finished {
+                continue;
+            }
+            let repeat = state.repeat;
+            state.tick(
+                &time,
+                commands.reborrow(),
+                entity,
+                &mut *animation,
+                animated_components.reborrow(),
+            );
+
+            if repeat != state.repeat {
+                commands.entity(entity).trigger(EntityAnimationRepeated);
+            }
+
+            if state.finished {
+                commands.entity(entity).trigger(EntityAnimationFinished);
+                if animation.remove_on_finish() {
+                    commands
+                        .entity(entity)
+                        .queue_silenced(|mut entity: EntityWorldMut| {
+                            entity.remove::<A>();
+                        });
+                }
+            }
+        }
+    }
+}
+
+fn on_add<A: EntityAnimation>(state: On<Add, A>, mut commands: Commands, new_animation: Query<&A>) {
+    let new_animation = new_animation
+        .get(state.entity)
+        .expect("should be unreachable in fact, this is literally the observer on add!");
+    // this serves as the initialization phase and multiple animations can be queued
+    // up on a single entity since the state is type-specific, which is impossible
+    // to express in a require from what i can tell
+    commands.entity(state.entity).insert(EntityAnimationState {
+        elapsed: new_animation.skip(),
+        repeat: new_animation.repeat(),
+        finished: false,
+        paused: new_animation.start_paused(),
+        _marker: PhantomData::<A>,
+    });
+}
+
+fn on_remove<A: EntityAnimation>(state: On<Remove, A>, mut commands: Commands) {
+    commands
+        .entity(state.entity)
+        .queue_silenced(|mut entity: EntityWorldMut| {
+            entity.remove::<EntityAnimationState<A>>();
+        });
+}
+
+#[derive(EntityEvent)]
+pub struct EntityAnimationFinished(Entity);
+
+#[derive(EntityEvent)]
+pub struct EntityAnimationRepeated(Entity);
+
+pub struct AnimationState {
+    elapsed: f32,
+    repeat: u32,
+    finished: bool,
+    paused: bool,
+}
+
+impl AnimationState {
+    pub const fn elapsed(&self) -> f32 {
+        self.elapsed
+    }
+
+    pub const fn remaining_repetions(&self) -> u32 {
+        self.repeat
+    }
+
+    pub const fn finished(&self) -> bool {
+        self.finished
+    }
+
+    pub const fn paused(&self) -> bool {
+        self.paused
+    }
+}
+
+impl<A> From<&EntityAnimationState<A>> for AnimationState {
+    fn from(value: &EntityAnimationState<A>) -> Self {
+        let EntityAnimationState {
+            elapsed,
+            repeat,
+            finished,
+            paused,
+            ..
+        } = *value;
+        AnimationState {
+            elapsed,
+            repeat,
+            finished,
+            paused,
+        }
+    }
+}
+
+#[derive(Component, Default, Clone, Copy)]
+struct EntityAnimationState<A> {
+    elapsed: f32,
+    repeat: u32, // 4 billion repetitions ought to be enough for anyone
+    finished: bool,
+    paused: bool,
+    _marker: PhantomData<A>,
+}
+
+impl<A: EntityAnimation> EntityAnimationState<A> {
+    fn reset(&mut self, animation: &A) {
+        self.elapsed = animation.skip();
+        self.finished = false;
+        self.repeat = animation.repeat();
+        self.paused = animation.start_paused();
+    }
+
+    fn tick(
+        &mut self,
+        time: &Time,
+        mut commands: Commands,
+        entity: Entity,
+        animation: &mut A,
+        mut animated_components: Query<A::QueryData, A::QueryFilter>,
+    ) {
+        if self.paused || self.finished {
+            return;
+        }
+
+        self.elapsed = (self.elapsed + time.delta_secs()).clamp(0.0, animation.duration());
+        animation.tick(
+            self.elapsed,
+            time.delta_secs(),
+            commands.reborrow(),
+            entity,
+            animated_components.reborrow(),
+        );
+        if self.elapsed >= animation.duration() && self.repeat > 0 {
+            self.repeat -= 1;
+            self.elapsed = 0.0;
+        }
+        self.finished = self.elapsed >= animation.duration() && self.repeat == 0;
+    }
+}
+
+/// control all aspects of animations, immediately
+#[derive(SystemParam)]
+pub struct AnimationController<'w, 's, A: EntityAnimation> {
+    animations: Query<'w, 's, (&'static mut A, &'static mut EntityAnimationState<A>)>,
+}
+
+impl<'w, 's, A: EntityAnimation> AnimationController<'w, 's, A> {
+    pub fn state(&mut self, entity: Entity) -> Option<AnimationState> {
+        self.animations
+            .get(entity)
+            .ok()
+            .map(|(_, state)| state.into())
+    }
+
+    pub fn restart(&mut self, entity: Entity) -> &mut Self {
+        if let Ok((animation, mut state)) = self.animations.get_mut(entity) {
+            state.reset(&animation);
+        }
+        self
+    }
+
+    pub fn restart_all(&mut self) -> &mut Self {
+        for (animation, mut state) in self.animations.iter_mut() {
+            state.reset(&animation);
+        }
+        self
+    }
+
+    pub fn flip_pause(&mut self, entity: Entity) -> &mut Self {
+        if let Ok((_, mut state)) = self.animations.get_mut(entity) {
+            state.paused = !state.paused;
+        }
+        self
+    }
+
+    pub fn pause(&mut self, entity: Entity) -> &mut Self {
+        if let Ok((_, mut state)) = self.animations.get_mut(entity) {
+            state.paused = true;
+        }
+        self
+    }
+
+    pub fn unpause(&mut self, entity: Entity) -> &mut Self {
+        if let Ok((_, mut state)) = self.animations.get_mut(entity) {
+            state.paused = false;
+        }
+        self
+    }
+
+    pub fn flip_pause_all(&mut self) -> &mut Self {
+        for (_, mut state) in self.animations.iter_mut() {
+            state.paused = !state.paused;
+        }
+        self
+    }
+
+    pub fn pause_all(&mut self) -> &mut Self {
+        for (_, mut state) in self.animations.iter_mut() {
+            state.paused = true;
+        }
+        self
+    }
+
+    pub fn unpause_all(&mut self) -> &mut Self {
+        for (_, mut state) in self.animations.iter_mut() {
+            state.paused = false;
+        }
+        self
+    }
+}
+
+impl AnimationControl for Commands<'_, '_> {
+    fn restart<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self {
+        self.queue(move |world: &mut World| {
+            let mut query = world.query::<(&mut EntityAnimationState<A>, &A)>();
+            let Ok((mut state, animation)) = query.get_mut(world, entity) else {
+                return;
+            };
+            state.reset(animation);
+        });
+        self
+    }
+
+    fn restart_all<A: EntityAnimation>(&mut self) -> &mut Self {
+        self.queue(|world: &mut World| {
+            let mut query = world.query::<(&mut EntityAnimationState<A>, &A)>();
+            for (mut state, animation) in query.iter_mut(world) {
+                state.reset(animation);
+            }
+        });
+        self
+    }
+
+    fn flip_pause<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self {
+        self.queue(move |world: &mut World| {
+            world
+                .get_mut::<EntityAnimationState<A>>(entity)
+                .map(|mut state| {
+                    state.paused = !state.paused;
+                });
+        });
+        self
+    }
+
+    fn pause<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self {
+        self.queue(move |world: &mut World| {
+            world
+                .get_mut::<EntityAnimationState<A>>(entity)
+                .map(|mut state| {
+                    state.paused = true;
+                });
+        });
+        self
+    }
+
+    fn unpause<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self {
+        self.queue(move |world: &mut World| {
+            world
+                .get_mut::<EntityAnimationState<A>>(entity)
+                .map(|mut state| {
+                    state.paused = false;
+                });
+        });
+        self
+    }
+
+    fn flip_pause_all<A: EntityAnimation>(&mut self) -> &mut Self {
+        self.queue(move |world: &mut World| {
+            let mut query = world.query::<&mut EntityAnimationState<A>>();
+            for mut state in query.iter_mut(world) {
+                state.paused = !state.paused;
+            }
+        });
+        self
+    }
+
+    fn pause_all<A: EntityAnimation>(&mut self) -> &mut Self {
+        self.queue(move |world: &mut World| {
+            let mut query = world.query::<&mut EntityAnimationState<A>>();
+            for mut state in query.iter_mut(world) {
+                state.paused = true;
+            }
+        });
+        self
+    }
+
+    fn unpause_all<A: EntityAnimation>(&mut self) -> &mut Self {
+        self.queue(move |world: &mut World| {
+            let mut query = world.query::<&mut EntityAnimationState<A>>();
+            for mut state in query.iter_mut(world) {
+                state.paused = false;
+            }
+        });
+        self
+    }
 }
