@@ -711,4 +711,18 @@ mod test {
         assert!(target.t > 0.0);
         assert_eq!(target.t, target.dt);
     }
+
+    // need to verify more!
+    // - multiple entities, same component
+    // - multiple components, same entity
+    // - check every in-trait option is respected
+    // - controls/commands
+    // - different schedules, system ordering
+
+    // and while i'm making notes
+    // - more direct domain control?
+    // - more interesting playback control?
+    // look over other animation systems, see what makes sense here
+    // overloading `domain` to do so much is a little too old-school clever
+    // one option is a single method that returns a configuration struct with reasonable defaults
 }
