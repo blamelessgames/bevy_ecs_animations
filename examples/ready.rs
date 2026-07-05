@@ -81,10 +81,6 @@ impl EntityAnimation for ReadyLetter {
         (-2.0..self.duration()).into()
     }
 
-    fn remove_on_finish(&self) -> bool {
-        false
-    }
-
     fn tick(
         &mut self,
         entity: Entity,

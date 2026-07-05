@@ -232,7 +232,10 @@ pub struct Delay<T, C> {
     _marker: PhantomData<fn() -> T>,
 }
 
-/// pushes the domain of the contained curve forward by `delay`
+/// pushes the domain of the contained curve forward by `delay`, in other
+/// words a delay of 1.0 applied to a curve with a domain of 0.0..1.0 will
+/// produce a curve with a domain of 0.0..2.0, and the contained curve will
+/// see its original domain once the timeline hits 1.0
 pub const fn delay<T, C: Curve<T>>(delay: f32, curve: C) -> Delay<T, C> {
     Delay {
         delay,
@@ -270,7 +273,7 @@ pub struct ScaledOutput<T, C, O> {
     _marker_out: PhantomData<fn() -> O>,
 }
 
-/// scales unit output. if you need something with more finesse, map or fn_curve it
+/// scales unit output. if you need something with more finesse, [map] or [fn_curve] it
 pub const fn scaled_output<T, C, O>(low: T, high: T, curve: C) -> ScaledOutput<T, C, O>
 where
     C: Curve<O>,

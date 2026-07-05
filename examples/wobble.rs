@@ -11,7 +11,7 @@ use bevy::{
 };
 use bevy_ecs_animations::{
     AnimationControl, EntityAnimation, EntityAnimationFinished, EntityAnimationPlugin,
-    combinators::{BoxedCurve, map, scaled_domain, scaled_output},
+    combinators::{BoxedCurve, map, scaled_output},
 };
 
 // 15 minutes oughta be enough for anybody
@@ -210,11 +210,7 @@ struct Wobble(BoxedCurve<Dir3>);
 impl Default for Wobble {
     fn default() -> Self {
         Wobble(Box::new(map(
-            scaled_domain(
-                0.0,
-                TOTAL_TIME,
-                scaled_output(TAU * -20.0, TAU * 20.0, EaseFunction::CircularInOut),
-            ),
+            scaled_output(TAU * -20.0, TAU * 20.0, EaseFunction::CircularInOut),
             |angle| Dir3::new_unchecked(Dir3::X.rotate_z(angle).normalize()),
         )))
     }
@@ -237,6 +233,6 @@ impl EntityAnimation for Wobble {
             return;
         };
         // do whatever you want, get ticked on schedule til duration is up
-        transform.rotate_axis(self.sample_unchecked(t), dt * 2.0);
+        transform.rotate_axis(self.sample_unchecked(self.normalized_t(t)), dt * 2.0);
     }
 }
