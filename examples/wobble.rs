@@ -1,10 +1,22 @@
-use std::f32::consts::*;
+use std::{f32::consts::*, ops::DerefMut, range::Range};
 
-use bevy::{color::palettes::css::*, prelude::*};
-use bevy_ecs_animations::{
-    AnimationControl, EntityAnimation, EntityAnimationPlugin, EntityAnimationRepeated, map,
-    scaled_domain, scaled_output,
+use bevy::{
+    color::palettes::css::*,
+    ecs::system::{
+        StaticSystemParam,
+        lifetimeless::{Read, SQuery, SResMut, Write},
+    },
+    prelude::*,
 };
+use bevy_ecs_animations::{
+    AnimationControl, EntityAnimation, EntityAnimationFinished, EntityAnimationPlugin,
+    PositiveFinite,
+    combinators::{BoxedCurve, map, scaled_domain, scaled_output},
+    positive_finite_domain,
+};
+
+// 15 minutes oughta be enough for anybody
+const TOTAL_TIME: f32 = 900.0;
 
 fn main() -> AppExit {
     App::new()
@@ -12,6 +24,7 @@ fn main() -> AppExit {
             DefaultPlugins,
             EntityAnimationPlugin::<Wobble>::default(),
             EntityAnimationPlugin::<Spin>::default(),
+            EntityAnimationPlugin::<Fade>::default(),
         ))
         .add_systems(Startup, startup)
         .add_systems(PreUpdate, input)
@@ -48,18 +61,15 @@ fn startup(
         Transform::from_translation(vec3(0.0, 0.0, 10.0)).looking_at(Vec3::ZERO, Dir3::Y),
     ));
 
-    commands
-        .spawn((
-            DirectionalLight {
-                color: DEEP_PINK.into(),
-                ..default()
-            },
-            Transform::from_translation(vec3(2.0, 2.0, 0.0)).looking_at(Vec3::ZERO, Dir3::Y),
-            Spin,
-        ))
-        .observe(|_: On<EntityAnimationRepeated>| {
-            println!("repeat!");
-        });
+    commands.spawn((
+        DirectionalLight {
+            color: DEEP_PINK.into(),
+            ..default()
+        },
+        Transform::from_translation(vec3(2.0, 2.0, 0.0)).looking_at(Vec3::ZERO, Dir3::Y),
+        // you can put the same animation on multiple entities, they all run independently
+        Spin,
+    ));
 
     commands.spawn((
         DirectionalLight {
@@ -88,93 +98,143 @@ fn startup(
         Spin,
     ));
 
-    commands.spawn((
-        Mesh3d(meshes.add(Capsule3d::new(1.0, 1.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: WHITE_SMOKE.into(),
-            metallic: 0.9,
-            perceptual_roughness: 0.2,
+    commands
+        .spawn((
+            Mesh3d(meshes.add(Capsule3d::new(1.0, 1.0))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: WHITE_SMOKE.with_alpha(1.0).into(),
+                metallic: 0.9,
+                perceptual_roughness: 0.2,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            })),
+            // you can put multiple animations on an entity. There is no
+            // automatic blending in this situation so don't target the
+            // same properties with two animations at once unless you
+            // like glitches and head-scratching bugs
+            Fade::Out,
+            Wobble::default(),
+        ))
+        .observe(
+            // you can observe entities for completion or the start of new repetitions
+            |finished: On<EntityAnimationFinished<Fade>>,
+             fade: Single<&Fade>,
+             mut commands: Commands| {
+                if **fade == Fade::Out {
+                    commands.entity(finished.event_target()).insert(Fade::In);
+                }
+            },
+        );
+}
 
-            ..default()
-        })),
-        Wobble::default(),
-    ));
+#[derive(Component, PartialEq, Eq)]
+enum Fade {
+    Out,
+    In,
+}
+
+impl EntityAnimation for Fade {
+    type Param = (
+        SResMut<Assets<StandardMaterial>>,
+        SQuery<Read<MeshMaterial3d<StandardMaterial>>>,
+    );
+
+    fn domain(&self) -> Range<PositiveFinite> {
+        match self {
+            // producing a reverse domain makes time run in reverse for the animation
+            Fade::Out => positive_finite_domain(3.5, 2.1),
+            Fade::In => positive_finite_domain(0.5, 1.7),
+        }
+    }
+
+    fn remove_on_finish(&self) -> bool {
+        // we want to stick around after Fade::Out
+        *self == Fade::In
+    }
+
+    fn tick(&mut self, entity: Entity, t: f32, _: f32, param: &mut StaticSystemParam<Self::Param>) {
+        // you can animate just about whatever your heart desires,
+        let (materials, mesh_materials) = param.deref_mut();
+
+        let Ok(MeshMaterial3d(handle)) = mesh_materials.get(entity) else {
+            return;
+        };
+        let Some(mut material) = materials.get_mut(handle) else {
+            return;
+        };
+        // because we're scaling a simple unit function
+        // we have to normalize t
+        let t = self.normalized_t(t);
+        material
+            .base_color
+            .set_alpha(EaseFunction::QuadraticIn.sample_clamped(t));
+    }
 }
 
 #[derive(Component)]
 struct Spin;
 
 impl EntityAnimation for Spin {
-    // use whatever components you like
-    type QueryData = &'static mut Transform;
-    // you'll usually want this
-    type QueryFilter = With<Self>;
+    type Param = SQuery<Write<Transform>, With<Self>>;
 
-    fn duration(&self) -> f32 {
-        12.0
+    fn domain(&self) -> Range<PositiveFinite> {
+        positive_finite_domain(0.0, 12.0)
     }
 
-    // repeat of 0 means "run once"
-    // so 9 means 10, in case you wanted
-    // more fence post fun
-    // i might clean this up lol
-    fn repeat(&self) -> u32 {
-        9
+    // Animations can repeat. If you need more than 4 billion repetitions,
+    // I'm sorry, you'll have to work for it.
+    // If you're just offended by using u32::MAX to mean forever, I sympathize deeply
+    fn repetitions(&self) -> u32 {
+        (TOTAL_TIME / 12.0) as u32
     }
 
     fn tick(
         &mut self,
+        entity: Entity,
         _: f32,
         dt: f32,
-        _: Commands,
-        entity: Entity,
-        mut components: Query<Self::QueryData, Self::QueryFilter>,
+        targets: &mut StaticSystemParam<Self::Param>,
     ) {
-        let Ok(mut transform) = components.get_mut(entity) else {
+        let Ok(mut transform) = targets.get_mut(entity) else {
             return;
         };
         // you don't need to use a curve
-        // obviously there are about 50 ways to achieve this same animation
+        // obviously there are about 50 million ways to achieve this same animation
         let new = (Rot2::radians(dt * 0.5) * transform.translation.xy()).normalize();
         *transform = Transform::from_translation(new.extend(3.0)).looking_at(Vec3::ZERO, Vec3::Y);
     }
 }
 
 #[derive(Component, Deref)]
-struct Wobble(Box<dyn Curve<Dir3> + Send + Sync + 'static>);
+struct Wobble(BoxedCurve<Dir3>);
 
 impl Default for Wobble {
     fn default() -> Self {
         Wobble(Box::new(map(
             scaled_domain(
                 0.0,
-                120.0,
+                TOTAL_TIME,
                 scaled_output(TAU * -20.0, TAU * 20.0, EaseFunction::CircularInOut),
             ),
             |angle| Dir3::new_unchecked(Dir3::X.rotate_z(angle).normalize()),
         )))
     }
 }
-
 impl EntityAnimation for Wobble {
-    // use whatever components you like
-    type QueryData = &'static mut Transform;
-    // you'll usually want this
-    type QueryFilter = With<Self>;
+    type Param = SQuery<Write<Transform>, With<Self>>;
 
-    fn duration(&self) -> f32 {
-        120.0
+    fn domain(&self) -> Range<PositiveFinite> {
+        positive_finite_domain(0.0, TOTAL_TIME)
     }
 
     fn tick(
         &mut self,
+        entity: Entity,
         t: f32,
         dt: f32,
-        _: Commands,
-        entity: Entity,
-        mut components: Query<Self::QueryData, Self::QueryFilter>,
+        targets: &mut StaticSystemParam<Self::Param>,
     ) {
-        let Ok(mut transform) = components.get_mut(entity) else {
+        let Ok(mut transform) = targets.get_mut(entity) else {
             return;
         };
         // do whatever you want, get ticked on schedule til duration is up

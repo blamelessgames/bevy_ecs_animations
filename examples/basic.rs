@@ -1,0 +1,74 @@
+use bevy::{
+    ecs::system::{StaticSystemParam, lifetimeless::*},
+    prelude::*,
+};
+use bevy_ecs_animations::*;
+use std::range::Range;
+
+// 1. define a component and implement EntityAnimation
+
+#[derive(Component)]
+struct FadeIn;
+
+impl EntityAnimation for FadeIn {
+    // define the param your tick function receives
+    type Param = SQuery<Write<TextColor>, With<Self>>;
+
+    // define the domain your animation runs. this is in seconds
+    // and it starts ticking when the component is inserted
+    fn domain(&self) -> Range<PositiveFinite> {
+        positive_finite_domain(0.0, 4.0)
+    }
+
+    // define the tick method, which will get invoked once
+    // per frame until the domain is covered
+    fn tick(
+        &mut self,
+        entity: Entity,
+        t: f32,
+        _dt: f32,
+        param: &mut StaticSystemParam<Self::Param>,
+    ) {
+        let Ok(mut color) = param.get_mut(entity) else {
+            return;
+        };
+        // ease functions expect unit input, so normalize t first
+        let t = self.normalized_t(t);
+        let alpha = EaseFunction::CubicIn.sample_unchecked(t);
+        color.0.set_alpha(alpha);
+    }
+}
+
+// 2. configure the plugin for the animation type
+fn main() -> AppExit {
+    App::new()
+        .add_plugins((DefaultPlugins, EntityAnimationPlugin::<FadeIn>::default()))
+        .add_systems(Startup, startup)
+        .run()
+}
+
+// 3. spawn an animation on an entity in a system
+fn startup(mut commands: Commands) {
+    commands.spawn((
+        Camera2d::default(),
+        Camera {
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
+    ));
+    commands.spawn((
+        Node {
+            width: percent(100.0),
+            height: percent(100.0),
+            padding: UiRect::top(percent(20.0)),
+            ..default()
+        },
+        Text::from("TEXT"),
+        TextFont {
+            font_size: FontSize::Vw(15.0),
+            ..default()
+        },
+        TextLayout::justify(Justify::Center),
+        FadeIn,
+    ));
+}

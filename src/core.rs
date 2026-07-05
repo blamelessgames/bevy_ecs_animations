@@ -1,76 +1,158 @@
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    range::Range,
+};
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::{
     component::{Component, Mutable},
     entity::Entity,
     event::EntityEvent,
-    lifecycle::{Add, Remove},
+    lifecycle::{Insert, Remove},
     observer::On,
-    query::{QueryData, QueryFilter},
     schedule::{IntoScheduleConfigs, ScheduleLabel},
-    system::{Commands, Query, Res, SystemParam},
+    system::{Commands, Local, Query, Res, StaticSystemParam, SystemParam},
     world::{EntityWorldMut, World},
 };
 use bevy_time::Time;
 
-/// implement this trait to
+pub use typed_floats::tf32::PositiveFinite;
+
+/// Core trait to define a component as an animation.
+///
+/// When a registered component type is added to an entity, this plugin configures internal
+/// state based on the values returned from trait methods and then invokes the
+/// [tick](EntityAnimation::tick) method according to the specifications. That's really about it.
+/// You don't even have to "animate" anything if you don't want to (but a regular system is
+/// probably simpler for whatever your goal is in that case).
+///
+/// The semantics of the [Param](EntityAnimation::Param) type bear some explanation. First, everything
+/// useful you might include here has lifetime parameters you cannot satisfy generically. The solution
+/// is to use the helpers in [lifetimeless](bevy_ecs::system::lifetimeless) or the additional helpers
+/// defined in this module ([SAnimationController] in particular, also [SLocal] can be helpful). Also,
+/// since the surrounding system that invokes the [tick](EntityAnimation::tick) method has to follow
+/// normal rust ownership semantics, it cannot pass ownership of this parameter along, because it is
+/// responsible to tick every component of the same type (if any), so you only get a mutable reference.
+/// There are helper methods to normalize everything so that it looks like a normal system, but the
+/// differences are a little grating until you get past them.
+///
+/// The upshot is that you can query whatever state you like, pull in resources, issue commands - it's
+/// ultimately a normal system with a complex schedule and unusual invocation semantics that are
+/// well-suited to sampling some source of animation parameters and setting them where they can have
+/// impacts on the game world.
 pub trait EntityAnimation: Component<Mutability = Mutable> {
-    /// define the query you're passed. i tried to go full system param
-    /// but it's hard!
-    type QueryData: QueryData;
+    /// Define the [SystemParam] for the [tick](EntityAnimation::tick) method.
+    ///
+    /// ```
+    ///
+    /// type Param: (
+    ///     SQuery(Write(Transform), With<Self>),
+    ///     SQuery(Read(Transform), Without<Self>),
+    ///     SCommands,
+    ///     SLocal<usize>,
+    /// );
+    /// ```
+    ///
+    /// Two things
+    /// 1. do not include the `Self` component in the query ([Self::tick] is `&mut self` so no
+    ///    need internally, and there is another means of cross-instance communication) except
+    ///    as a filter.
+    /// 2. do not use the [AnimationController] system param for the same type (it will
+    ///    conflict in the system that invokes tick and you will crash with an error in
+    ///    plugin code). Controllers for other types work just fine.
+    ///
+    /// If you're trying to communicate across component instances you can use [SLocal]. The
+    /// system that invokes component instances experiences one invocation per type per frame,
+    /// so the semantics of [SLocal] are slightly different. It is shared across all instances
+    /// of a given component no matter what entity they're on. if you want to control instances
+    /// of other component types, then the appropriate [AnimationController] will work perfectly
+    /// (and you'll probably want to use [EntityAnimationPlugin::ticked] for ordering.
+    ///
+    /// Aside from that, it's what you're used to from Bevy's ECS.
+    type Param: SystemParam;
 
-    /// filter the query, () if you don't need one
-    type QueryFilter: QueryFilter;
-
-    /// schedule to update the animation. probably Update is fine but change it if you need
+    /// [ScheduleLabel] to run the tick system. Defaults to [Update].
+    ///
+    /// Changes to this have no effect after initialization, so it doesn't take `&self`
     fn schedule() -> impl ScheduleLabel {
         Update
     }
 
-    /// overall duration. can be longer or shorter than contained curves, it's up to you
-    fn duration(&self) -> f32;
+    /// Overall domain of the animation timeline. Order determines animation order, this range is
+    /// ticked by the delta time of the schedule's time resource
+    ///
+    /// Can be longer or shorter than contained curves, their domains are not considered at all.
+    ///
+    /// Changes to this value are noticed when a component instance is added. Once an animation
+    /// is on an entity the domain is locked.
+    fn domain(&self) -> Range<PositiveFinite>;
 
-    /// times to repeat. there isn't really a "forever" but u32::MAX is unlikely to ever
-    /// finish, right? and if it is just watch the event, grab the controller, and restart
-    /// you're a pathological case, deal
-    fn repeat(&self) -> u32 {
-        0
+    /// How many times to run the animation. 0 is equivalent to starting paused, nothing will
+    /// happen until some external force uses a control API to change this.
+    ///
+    /// Defaults to 1
+    ///
+    /// Changes to this value are noticed when a component instance is added. Once an animation
+    /// is on an entity the repetition count is locked.
+    fn repetitions(&self) -> u32 {
+        1
     }
 
-    /// time to skip in the first repetition, if you need it. not sure this is useful
-    fn skip(&self) -> f32 {
-        0.0
-    }
-
-    /// return true to control when you start the animation. this way you can cue up
-    /// sequences without moving archetypes (since this whole thing started as "how can
-    /// i animate stuff without all the overhead of being generic but without copying the
-    /// danged infrastructure in every instance? and once you start saving cycles and bytes
-    /// the tendency is to push it as far as you can")
+    /// Whether to wait to start the animation, or tick right away.
+    ///
+    /// Defaults to false.
+    ///
+    /// Changes to this value are noticed when a component instance is added. Once an animation
+    /// is on an entity it will either start or it won't, that's just how time works.
     fn start_paused(&self) -> bool {
         false
     }
 
-    /// return true if you want the aniamtion components removed when the animation finishes
-    /// or don't whatever. if archetype moves bother you, have some control. if you don't
-    /// care, leave it up to us
+    /// Whether the plugin should remove this component once it has finished
+    ///
+    /// Defaults to true, change to false if you want to leave them around
+    ///
+    /// This method is invoked during the frame a component reaches the finished state, so it is
+    /// live.
     fn remove_on_finish(&self) -> bool {
         true
     }
 
-    /// called every invocation of the schedule with the t from 0.0->duration and dt of the
-    /// current frame
-    /// commands can be used to do whatever
-    fn tick(
-        &mut self,
-        t: f32,
-        dt: f32,
-        commands: Commands,
-        entity: Entity,
-        components: Query<Self::QueryData, Self::QueryFilter>,
-    );
+    /// Called every invocation of the schedule that an instance is active
+    ///
+    /// - `entity` - the entity holding this component
+    /// - `t` - total seconds this animation has been running
+    /// - `dt` - delta time from last invocation
+    /// - `param` - [Self::Param]
+    fn tick(&mut self, entity: Entity, t: f32, dt: f32, param: &mut StaticSystemParam<Self::Param>);
+
+    /// bring `t` into [0, 1] over the current domain
+    fn normalized_t(&self, t: f32) -> f32 {
+        let domain = self.domain();
+        let (low, high) = (domain.start.get(), domain.end.get());
+
+        if low == high {
+            0.0
+        } else if low < high {
+            (t - low) / (high - low)
+        } else {
+            (high - t) / (high - low)
+        }
+    }
 }
+
+/// helper to make a domain. panics if you pass a negative
+pub fn positive_finite_domain(start: f32, end: f32) -> Range<PositiveFinite> {
+    let (start, end) = PositiveFinite::try_from(start)
+        .ok()
+        .zip(PositiveFinite::try_from(end).ok())
+        .expect("no negative time in your domain");
+    (start..end).into()
+}
+
+/// a Local system param with 'static lifetime
+pub type SLocal<T> = Local<'static, T>;
 
 /// Command interface to control animations commands-style. if you want something
 /// more immediate, use AnimationController as a system parameter
@@ -92,14 +174,19 @@ pub trait AnimationControl {
     fn unpause_all<A: EntityAnimation>(&mut self) -> &mut Self;
 }
 
+/// Add this an instance of this plugin for each animation type you build.
+///
+/// # Type Parameters
+///
+/// * `A` — The [EntityAnimation][Component]
 pub struct EntityAnimationPlugin<A> {
-    _marker: PhantomData<A>,
+    _animation: PhantomData<fn() -> A>,
 }
 
 impl<A: EntityAnimation> Default for EntityAnimationPlugin<A> {
     fn default() -> Self {
         Self {
-            _marker: PhantomData,
+            _animation: PhantomData,
         }
     }
 }
@@ -114,7 +201,7 @@ impl<A: EntityAnimation> Plugin for EntityAnimationPlugin<A> {
             )
                 .chain(),
         )
-        .add_observer(on_add::<A>)
+        .add_observer(on_insert::<A>)
         .add_observer(on_remove::<A>);
     }
 }
@@ -126,29 +213,27 @@ impl<A: EntityAnimation> EntityAnimationPlugin<A> {
 
     fn tick(
         mut animations: Query<(Entity, &mut A, &mut EntityAnimationState<A>)>,
-        mut animated_components: Query<A::QueryData, A::QueryFilter>,
+        mut param: StaticSystemParam<<A as EntityAnimation>::Param>,
         mut commands: Commands,
         time: Res<Time>,
     ) {
         for (entity, mut animation, mut state) in animations.iter_mut() {
-            if state.finished {
+            if state.finished() {
                 continue;
             }
-            let repeat = state.repeat;
-            state.tick(
-                &time,
-                commands.reborrow(),
-                entity,
-                &mut *animation,
-                animated_components.reborrow(),
-            );
 
-            if repeat != state.repeat {
-                commands.entity(entity).trigger(EntityAnimationRepeated);
+            state.tick(time.delta_secs(), entity, &mut *animation, &mut param);
+
+            if state.just_repeated() {
+                commands
+                    .entity(entity)
+                    .trigger(entity_animation_repeated::<A>);
             }
 
-            if state.finished {
-                commands.entity(entity).trigger(EntityAnimationFinished);
+            if state.finished() {
+                commands
+                    .entity(entity)
+                    .trigger(entity_animation_finished::<A>);
                 if animation.remove_on_finish() {
                     commands
                         .entity(entity)
@@ -161,20 +246,18 @@ impl<A: EntityAnimation> EntityAnimationPlugin<A> {
     }
 }
 
-fn on_add<A: EntityAnimation>(state: On<Add, A>, mut commands: Commands, new_animation: Query<&A>) {
-    let new_animation = new_animation
-        .get(state.entity)
-        .expect("should be unreachable in fact, this is literally the observer on add!");
-    // this serves as the initialization phase and multiple animations can be queued
-    // up on a single entity since the state is type-specific, which is impossible
-    // to express in a require from what i can tell
-    commands.entity(state.entity).insert(EntityAnimationState {
-        elapsed: new_animation.skip(),
-        repeat: new_animation.repeat(),
-        finished: false,
-        paused: new_animation.start_paused(),
-        _marker: PhantomData::<A>,
-    });
+fn on_insert<A: EntityAnimation>(
+    add_animation: On<Insert, A>,
+    mut commands: Commands,
+    animations: Query<&A>,
+) {
+    // this serves as the initialization phase
+    let Ok(animation) = animations.get(add_animation.entity) else {
+        return;
+    };
+    let mut state = EntityAnimationState::<A>::default();
+    state.reset(animation);
+    commands.entity(add_animation.entity).insert(state);
 }
 
 fn on_remove<A: EntityAnimation>(state: On<Remove, A>, mut commands: Commands) {
@@ -185,26 +268,68 @@ fn on_remove<A: EntityAnimation>(state: On<Remove, A>, mut commands: Commands) {
         });
 }
 
+/// Observe an entity to get notified when an animation finishes
 #[derive(EntityEvent)]
-pub struct EntityAnimationFinished(Entity);
+pub struct EntityAnimationFinished<A: EntityAnimation>(
+    #[event_target] Entity,
+    PhantomData<fn() -> A>,
+);
 
+fn entity_animation_finished<A: EntityAnimation>(entity: Entity) -> EntityAnimationFinished<A> {
+    EntityAnimationFinished(entity, PhantomData)
+}
+
+/// Observe an entity to get notified when an animation repeats
 #[derive(EntityEvent)]
-pub struct EntityAnimationRepeated(Entity);
+pub struct EntityAnimationRepeated<A: EntityAnimation>(
+    #[event_target] Entity,
+    PhantomData<fn() -> A>,
+);
 
+fn entity_animation_repeated<A: EntityAnimation>(entity: Entity) -> EntityAnimationRepeated<A> {
+    EntityAnimationRepeated(entity, PhantomData)
+}
+
+/// The state of the animation. Users are free to inspect it!
+#[derive(Debug, Clone, Copy, Default)]
 pub struct AnimationState {
     elapsed: f32,
-    repeat: u32,
+    last_dt: f32,
+    domain: Range<PositiveFinite>,
+    repetitions: u32,
+    repetitions_remaining: u32,
     finished: bool,
     paused: bool,
 }
 
 impl AnimationState {
+    fn repetition_finished(&mut self) {
+        self.repetitions_remaining -= 1;
+        if self.repetitions_remaining == 0 {
+            self.finished = true;
+        } else {
+            self.elapsed = 0.0;
+            self.last_dt = 0.0;
+        }
+    }
+
+    /// elapsed time. this always counts up even when the animation counts down
+    /// this is accumulated from the tick system's contextual [Time] resource
     pub const fn elapsed(&self) -> f32 {
         self.elapsed
     }
 
-    pub const fn remaining_repetions(&self) -> u32 {
-        self.repeat
+    /// last delta time of the tick system's contextual [Time] resource
+    pub const fn last_dt(&self) -> f32 {
+        self.last_dt
+    }
+
+    pub const fn repetitions(&self) -> u32 {
+        self.repetitions
+    }
+
+    pub const fn repetitions_remaining(&self) -> u32 {
+        self.repetitions_remaining
     }
 
     pub const fn finished(&self) -> bool {
@@ -218,64 +343,118 @@ impl AnimationState {
 
 impl<A> From<&EntityAnimationState<A>> for AnimationState {
     fn from(value: &EntityAnimationState<A>) -> Self {
-        let EntityAnimationState {
-            elapsed,
-            repeat,
-            finished,
-            paused,
-            ..
-        } = *value;
-        AnimationState {
-            elapsed,
-            repeat,
-            finished,
-            paused,
+        value.state
+    }
+}
+
+#[derive(Component, Clone, Copy)]
+struct EntityAnimationState<A> {
+    state: AnimationState,
+    just_repeated: bool,
+    _marker: PhantomData<fn() -> A>,
+}
+
+impl<A> Deref for EntityAnimationState<A> {
+    type Target = AnimationState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl<A> DerefMut for EntityAnimationState<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
+}
+
+impl<A> Default for EntityAnimationState<A> {
+    fn default() -> Self {
+        EntityAnimationState {
+            state: Default::default(),
+            just_repeated: false,
+            _marker: PhantomData,
         }
     }
 }
 
-#[derive(Component, Default, Clone, Copy)]
-struct EntityAnimationState<A> {
-    elapsed: f32,
-    repeat: u32, // 4 billion repetitions ought to be enough for anyone
-    finished: bool,
-    paused: bool,
-    _marker: PhantomData<A>,
-}
-
 impl<A: EntityAnimation> EntityAnimationState<A> {
+    fn finished(&self) -> bool {
+        self.state.finished
+    }
+
+    fn just_repeated(&mut self) -> bool {
+        let just_repeated = self.just_repeated;
+        self.just_repeated = false;
+        just_repeated
+    }
+
     fn reset(&mut self, animation: &A) {
-        self.elapsed = animation.skip();
-        self.finished = false;
-        self.repeat = animation.repeat();
-        self.paused = animation.start_paused();
+        self.state = AnimationState {
+            elapsed: 0.0,
+            last_dt: 0.0,
+            domain: animation.domain(),
+            repetitions: animation.repetitions(),
+            repetitions_remaining: animation.repetitions(),
+            finished: animation.repetitions() == 0,
+            paused: animation.start_paused(),
+        };
     }
 
     fn tick(
         &mut self,
-        time: &Time,
-        mut commands: Commands,
+        dt: f32,
         entity: Entity,
         animation: &mut A,
-        mut animated_components: Query<A::QueryData, A::QueryFilter>,
+        param: &mut StaticSystemParam<<A as EntityAnimation>::Param>,
     ) {
-        if self.paused || self.finished {
+        if self.state.paused || self.state.finished {
             return;
         }
 
-        self.elapsed = (self.elapsed + time.delta_secs()).clamp(0.0, animation.duration());
-        animation.tick(
-            self.elapsed,
-            time.delta_secs(),
-            commands.reborrow(),
-            entity,
-            animated_components.reborrow(),
-        );
-        if self.elapsed >= animation.duration() && self.repeat > 0 {
-            self.repeat -= 1;
-            self.elapsed = 0.0;
+        // we're going to cheat Time a little bit here
+        let mut finished = false;
+        let start = self.state.domain.start.get(); // 3.5
+        let end = self.state.domain.end.get(); // 2.1
+        let backward = start - end; // 1.4
+        let last_elapsed = self.state.elapsed;
+        // just assume state will accumulate normally
+        self.state.last_dt = dt;
+        self.state.elapsed += dt; // just hit 2.1
+        // okay this is a little fun!
+        // keep in mind, state always goes forward
+        // but we make new Time instances so that
+        // can go backward
+        let (min, max) = if backward > 0.0 {
+            (end, start)
+        } else {
+            (start, end)
+        };
+
+        if self.state.elapsed < min {
+            return;
         }
-        self.finished = self.elapsed >= animation.duration() && self.repeat == 0;
+        if self.state.elapsed >= max {
+            // okay if we get here we have just ended
+            // and we want to run with the last bit of dt
+            finished = true;
+            self.state.last_dt = max - last_elapsed;
+            self.state.elapsed = max;
+        }
+        // now we figure out what we really mean by elapsed!
+        let (elapsed, dt) = if backward > 0.0 {
+            let elapsed = (start + end) - self.state.elapsed;
+            (elapsed, self.state.last_dt)
+        } else {
+            // very simple in forward!
+            (self.state.elapsed, self.state.last_dt)
+        };
+
+        animation.tick(entity, elapsed, dt, param);
+
+        if finished {
+            self.state.repetition_finished();
+        }
     }
 }
 
@@ -284,6 +463,9 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
 pub struct AnimationController<'w, 's, A: EntityAnimation> {
     animations: Query<'w, 's, (&'static mut A, &'static mut EntityAnimationState<A>)>,
 }
+
+pub type SAnimationController<A> =
+    StaticSystemParam<'static, 'static, AnimationController<'static, 'static, A>>;
 
 impl<'w, 's, A: EntityAnimation> AnimationController<'w, 's, A> {
     pub fn state(&mut self, entity: Entity) -> Option<AnimationState> {
@@ -433,5 +615,62 @@ impl AnimationControl for Commands<'_, '_> {
             }
         });
         self
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::ops::DerefMut;
+
+    use super::*;
+    use bevy::prelude::*;
+    use bevy_ecs::system::lifetimeless::SQuery;
+    use bevy_time::TimePlugin;
+
+    #[derive(Component)]
+    #[require(UiTransform, TextColor, Visibility)]
+    struct TestAnimation {
+        duration: f32,
+    }
+
+    impl EntityAnimation for TestAnimation {
+        type Param = (
+            SQuery<
+                (
+                    &'static mut UiTransform,
+                    &'static mut TextColor,
+                    &'static mut Visibility,
+                ),
+                With<TestAnimation>,
+            >,
+            SLocal<usize>,
+        );
+
+        fn domain(&self) -> Range<PositiveFinite> {
+            positive_finite_domain(0.0, 100.0)
+        }
+
+        fn tick(
+            &mut self,
+            _entity: Entity,
+            _t: f32,
+            _dt: f32,
+            param: &mut StaticSystemParam<Self::Param>,
+        ) {
+            let (targets, tracker) = param.deref_mut();
+            **tracker += 1;
+            for (_transform, _color, _visibility) in targets.iter_mut() {}
+        }
+    }
+
+    #[test]
+    fn test() {
+        let mut app = App::new();
+        app.add_plugins((
+            TimePlugin,
+            EntityAnimationPlugin::<TestAnimation>::default(),
+        ));
+
+        app.update();
     }
 }

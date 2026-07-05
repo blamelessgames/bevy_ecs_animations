@@ -6,12 +6,20 @@ edition = "2024"
 [dependencies]
 bevy_app = { version = "0.19.0", default-features = false }
 bevy_ecs = { version = "0.19.0", default-features = false }
-bevy_math = { version = "0.19.0", default-features = false, features = ["curve"]}
+bevy_math = { version = "0.19.0", default-features = false, optional = true }
 bevy_time = { version = "0.19.0", default-features = false }
+typed_floats = { version = "1.0.7" }
+
+[dev-dependencies]
+bevy = { version = "0.19.0", features = ["debug"] }
 
 [features]
+# probably will move the combinators to a separate crate
 default = [
-    "std"
+    "std", "combinators"
+]
+combinators = [
+    "bevy_math/curve"
 ]
 std = [
     "bevy_math/std"
@@ -22,6 +30,3 @@ libm = [
 nostd-libm = [
     "bevy_math/nostd-libm"
 ]
-
-[dev-dependencies]
-bevy = "0.19.0"
