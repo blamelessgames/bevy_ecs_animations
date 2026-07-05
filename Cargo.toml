@@ -2,6 +2,16 @@
 name = "bevy-ecs-animations"
 version = "0.19.0"
 edition = "2024"
+authors = ["BlamelessGames"]
+description = "An ECS-first approach to procedural animation in Bevy."
+repository = "https://github.com/blamelessgames/bevy-ecs-animations"
+license = "MIT OR Apache-2.0"
+keywords = ["bevy", "animation", "ecs", "procedural"]
+categories = ["animation", "graphics"]
+readme = "README.md"
+rust-version = "1.95.0"
+documentation = "https://docs.rs/bevy-ecs-animations"
+homepage = "https://github.com/blamelessgames/bevy-ecs-animations"
 
 [dependencies]
 bevy_app = { version = "0.19.0", default-features = false }
