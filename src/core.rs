@@ -42,8 +42,7 @@ use bevy_time::Time;
 pub trait EntityAnimation: Component<Mutability = Mutable> {
     /// Define the [SystemParam] for the [tick](EntityAnimation::tick) method.
     ///
-    /// ```
-    ///
+    /// ```ignore
     /// type Param: (
     ///     SQuery(Write(Transform), With<Self>),
     ///     SQuery(Read(Transform), Without<Self>),
@@ -65,7 +64,7 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
     /// so the semantics of [SLocal] are slightly different. It is shared across all instances
     /// of a given component no matter what entity they're on. if you want to control instances
     /// of other component types, then the appropriate [AnimationController] will work perfectly
-    /// (and you'll probably want to use [EntityAnimationPlugin::ticked] for ordering.
+    /// (and you'll probably want to use [EntityAnimationPlugin::did_tick] for ordering.
     ///
     /// Aside from that, it's what you're used to from Bevy's ECS.
     type Param: SystemParam;
@@ -204,8 +203,9 @@ impl<A: EntityAnimation> Plugin for EntityAnimationPlugin<A> {
         app.add_systems(
             A::schedule(),
             (
+                EntityAnimationPlugin::<A>::will_tick,
                 EntityAnimationPlugin::<A>::tick,
-                EntityAnimationPlugin::<A>::ticked,
+                EntityAnimationPlugin::<A>::did_tick,
             )
                 .chain(),
         )
@@ -215,9 +215,13 @@ impl<A: EntityAnimation> Plugin for EntityAnimationPlugin<A> {
 }
 
 impl<A: EntityAnimation> EntityAnimationPlugin<A> {
+    /// system that runs immediately before this plugin instance's tick system,
+    /// exposed for ordering
+    pub fn will_tick() {}
+
     /// system that runs immediately after this plugin instance's tick system,
     /// exposed for ordering
-    pub fn ticked() {}
+    pub fn did_tick() {}
 
     fn tick(
         mut animations: Query<(Entity, &mut A, &mut EntityAnimationState<A>)>,

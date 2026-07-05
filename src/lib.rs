@@ -2,7 +2,7 @@
 //!
 //! ## How to use it
 //!
-//! ```
+//! ```no_run
 //! use std::range::Range;
 //! use bevy::{prelude::*, ecs::system::{lifetimeless::*, StaticSystemParam}};
 //! use bevy_ecs_animations::*;
@@ -19,8 +19,8 @@
 //!
 //!     // define the domain your animation runs. this is in seconds
 //!     // and it starts ticking when the component is inserted
-//!     fn domain(&self) -> Range<PositiveFinite> {
-//!         positive_finite_domain(0.0, 4.0)   
+//!     fn domain(&self) -> Range<f32> {
+//!         (0.0..4.0).into()
 //!     }
 //!     
 //!     // define the tick method, which will get invoked once
@@ -43,7 +43,7 @@
 //! }
 //!
 //! // 2. configure the plugin for the animation type
-//! fn run() -> AppExit {
+//! fn main() -> AppExit {
 //!     App::new()
 //!         .add_plugins((DefaultPlugins, EntityAnimationPlugin::<FadeIn>::default()))
 //!         .add_systems(Startup, startup)
@@ -60,6 +60,8 @@
 //!         },
 //!     ));
 //!     commands.spawn((
+//!         // inserting the component on an entity starts the animation
+//!         FadeIn,
 //!         Node {
 //!             width: percent(100.0),
 //!             height: percent(100.0),
@@ -72,7 +74,6 @@
 //!             ..default()
 //!         },
 //!         TextLayout::justify(Justify::Center),
-//!         FadeIn,
 //!     ));
 //! }
 //!
@@ -110,14 +111,10 @@
 //! on it, then register the component with the [EntityAnimationPlugin] during app initialization and
 //! insert an instance on entities that should be animated, optionally managing the animation via
 //! commands or an [AnimationController]. The [EntityAnimation] trait centers on the
-//! [tick](crate::core::EntityAnimation::tick) method, which is invoked periodically while the
+//! [tick](EntityAnimation::tick) method, which is invoked periodically while the
 //! animation in question is live. The trait defines the coarse-grained management
 //! behavior via associated types and function definitions, with an aim of allowing full control when
 //! the (hopefully reasonable) defaults are insufficient.
-//!
-//! In particular, you can absolutely specify the [AnimationController] for any other [EntityAnimation] type,
-//! which means defining animations that manage other animations is 100% supported (and I plan a curve
-//! instance that helps do so parametrically).
 
 // more probably makes sense here but this should hold true until it doesn't
 #![deny(unsafe_code)]

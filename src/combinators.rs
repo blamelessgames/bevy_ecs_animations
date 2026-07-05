@@ -36,7 +36,7 @@ impl<T: Clone> Curve<T> for Constant<T> {
 pub struct Seq<T, C1, C2> {
     first_curve: C1,
     second_curve: C2,
-    _marker: PhantomData<fn() -> T>,
+    _out: PhantomData<fn() -> T>,
 }
 
 /// follows one curve with the next, respecting underlying domains. if there is a gap between
@@ -45,7 +45,7 @@ pub const fn seq<T, C1: Curve<T>, C2: Curve<T>>(first: C1, second: C2) -> Seq<T,
     Seq {
         first_curve: first,
         second_curve: second,
-        _marker: PhantomData,
+        _out: PhantomData,
     }
 }
 
@@ -75,8 +75,8 @@ impl<T, C1: Curve<T>, C2: Curve<T>> Curve<T> for Seq<T, C1, C2> {
 pub struct Zip<T1, T2, C1, C2> {
     first: C1,
     second: C2,
-    _marker1: PhantomData<fn() -> T1>,
-    _marker2: PhantomData<fn() -> T2>,
+    _out_1: PhantomData<fn() -> T1>,
+    _out_2: PhantomData<fn() -> T2>,
 }
 
 /// combines two curves into a 2-tuple. curves are clamped to
@@ -90,8 +90,8 @@ pub const fn zip<T1, T2, C1: Curve<T1>, C2: Curve<T2>>(
     Zip {
         first,
         second,
-        _marker1: PhantomData,
-        _marker2: PhantomData,
+        _out_1: PhantomData,
+        _out_2: PhantomData,
     }
 }
 
@@ -115,7 +115,7 @@ impl<T1, T2, C1: Curve<T1>, C2: Curve<T2>> Curve<(T1, T2)> for Zip<T1, T2, C1, C
 pub struct Pipe<T, C1, C2> {
     source: C1,
     sink: C2,
-    _marker_out: PhantomData<fn() -> T>,
+    _out: PhantomData<fn() -> T>,
 }
 
 /// sends the output of source to the input of sink
@@ -127,7 +127,7 @@ where
     Pipe {
         source,
         sink,
-        _marker_out: PhantomData,
+        _out: PhantomData,
     }
 }
 
@@ -149,7 +149,7 @@ pub struct Interpolate<T, C1, C2, C3> {
     first: C1,
     second: C2,
     t: C3,
-    _marker: PhantomData<fn() -> T>,
+    _out: PhantomData<fn() -> T>,
 }
 
 /// interpolate between first and second using the result from t. all three curves must have
@@ -166,7 +166,7 @@ where
         first,
         second,
         t,
-        _marker: PhantomData,
+        _out: PhantomData,
     }
 }
 
@@ -193,8 +193,7 @@ where
 pub struct Map<T, O, C, F> {
     curve: C,
     mapper: F,
-    _marker_in: PhantomData<fn() -> T>,
-    _marker_out: PhantomData<fn() -> O>,
+    _mapper: PhantomData<fn(T) -> O>,
 }
 
 /// runs the given function over each t value. the most general combinator of all
@@ -206,8 +205,7 @@ where
     Map {
         curve,
         mapper,
-        _marker_in: PhantomData,
-        _marker_out: PhantomData,
+        _mapper: PhantomData,
     }
 }
 
@@ -229,7 +227,7 @@ where
 pub struct Delay<T, C> {
     delay: f32,
     curve: C,
-    _marker: PhantomData<fn() -> T>,
+    _out: PhantomData<fn() -> T>,
 }
 
 /// pushes the domain of the contained curve forward by `delay`, in other
@@ -240,18 +238,7 @@ pub const fn delay<T, C: Curve<T>>(delay: f32, curve: C) -> Delay<T, C> {
     Delay {
         delay,
         curve,
-        _marker: PhantomData,
-    }
-}
-
-impl<T, C: Curve<T>> From<(f32, C)> for Delay<T, C> {
-    fn from((delay, curve): (f32, C)) -> Self {
-        debug_assert!(delay >= 0.0);
-        Self {
-            delay,
-            curve,
-            _marker: PhantomData,
-        }
+        _out: PhantomData,
     }
 }
 
@@ -270,7 +257,7 @@ pub struct ScaledOutput<T, C, O> {
     low: T,
     high: T,
     curve: C,
-    _marker_out: PhantomData<fn() -> O>,
+    _out: PhantomData<fn() -> O>,
 }
 
 /// scales unit output. if you need something with more finesse, [map] or [fn_curve] it
@@ -284,7 +271,7 @@ where
         low,
         high,
         curve,
-        _marker_out: PhantomData,
+        _out: PhantomData,
     }
 }
 
@@ -310,7 +297,7 @@ pub struct ScaledDomain<T, C> {
     low: f32,
     high: f32,
     curve: C,
-    _marker: PhantomData<fn() -> T>,
+    _out: PhantomData<fn() -> T>,
 }
 
 /// scales the underlying curve so its domain is exposed
@@ -321,19 +308,7 @@ pub const fn scaled_domain<T, C: Curve<T>>(low: f32, high: f32, curve: C) -> Sca
         low,
         high,
         curve,
-        _marker: PhantomData,
-    }
-}
-
-impl<T, C: Curve<T>> From<(f32, f32, C)> for ScaledDomain<T, C> {
-    fn from((low, high, curve): (f32, f32, C)) -> Self {
-        debug_assert!(low < high && low >= 0.0);
-        Self {
-            low,
-            high,
-            curve,
-            _marker: PhantomData,
-        }
+        _out: PhantomData,
     }
 }
 
@@ -357,7 +332,7 @@ pub struct FnCurve<Func, O> {
     start: f32,
     end: f32,
     function: Func,
-    _marker: PhantomData<fn() -> O>,
+    _out: PhantomData<fn() -> O>,
 }
 
 /// exposes the given function with the given domain
@@ -369,7 +344,7 @@ where
         start,
         end,
         function,
-        _marker: PhantomData,
+        _out: PhantomData,
     }
 }
 
@@ -394,19 +369,33 @@ pub struct Signal<const N: usize, T> {
 }
 
 /// returns the configured instance when the t value is within tolerance of the setting
-/// that is to say `signal(`
-pub fn signal<const N: usize, T>(
+/// i want better. frame rate dependence blah. maybe i just don't use the curve trait
+/// doesn't *need* to be a curve
+pub const fn signal<const N: usize, T>(
     low: f32,
     high: f32,
     triggers: [(f32, T); N],
-    // this is a bad answer. might actually need a thread local here
-    // and some coordination with the tick mechanism to pass the actual
-    // dt in
     tolerance: f32,
 ) -> Signal<N, T>
 where
     T: Clone,
 {
+    debug_assert!(
+        {
+            let mut good = true;
+            let mut i = 0;
+            loop {
+                good = good && triggers[i].0 >= low && triggers[i].0 <= high;
+                i += 1;
+                if i == triggers.len() {
+                    break;
+                }
+            }
+            good
+        },
+        "triggers outside domain"
+    );
+
     Signal {
         low,
         high,
