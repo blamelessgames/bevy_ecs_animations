@@ -469,8 +469,19 @@ fn test_combinators() {
     let c = crazy();
     assert_eq!(c.domain().start(), 0.0);
     assert_eq!(c.domain().end(), 2.0);
-    // 60 frames a second oughta be enough for anyone
-    for t in c.domain().spaced_points(120).unwrap() {
-        println!("{:?}", c.sample_unchecked(t));
+    let result = c
+        .domain()
+        .spaced_points(120)
+        .unwrap()
+        .map(|t| c.sample_unchecked(t))
+        .collect::<Vec<_>>();
+    assert_eq!(result.len(), 120);
+    // we aren't going to verify every step but we will make sure everything is finite
+    // which really doesn't mean much but i don't want to verify outcomes of sampling curves!
+    for (i, sample) in result.into_iter().enumerate() {
+        assert!(
+            sample.0.is_finite() && sample.1.is_finite(),
+            "sample {i} is not finite!"
+        );
     }
 }

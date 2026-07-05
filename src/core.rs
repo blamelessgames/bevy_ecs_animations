@@ -12,7 +12,7 @@ use bevy_ecs::{
     lifecycle::{Insert, Remove},
     observer::On,
     schedule::{IntoScheduleConfigs, ScheduleLabel},
-    system::{Commands, Local, Query, Res, StaticSystemParam, SystemParam},
+    system::{Commands, Local, Query, Res, Single, StaticSystemParam, SystemParam},
     world::{EntityWorldMut, World},
 };
 use bevy_time::Time;
@@ -158,8 +158,11 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
     }
 }
 
-/// a Local system param with 'static lifetime
+/// a [Local] system param with 'static lifetime
 pub type SLocal<T> = Local<'static, T>;
+
+/// a terribly named [Single] with 'static lifetime
+pub type SSingle<D, F> = Single<'static, 'static, D, F>;
 
 /// Command interface to control animations commands-style. if you want something
 /// more immediate, use AnimationController as a system parameter
@@ -642,53 +645,70 @@ mod test {
 
     use super::*;
     use bevy::prelude::*;
-    use bevy_ecs::system::lifetimeless::SQuery;
+    use bevy_ecs::system::lifetimeless::*;
     use bevy_time::TimePlugin;
 
     #[derive(Component)]
-    #[require(UiTransform, TextColor, Visibility)]
+    #[require(TestTarget)]
     struct TestAnimation {
         duration: f32,
     }
 
+    #[derive(Component, Default, Debug)]
+    struct TestTarget {
+        local: usize,
+        t: f32,
+        dt: f32,
+    }
+
     impl EntityAnimation for TestAnimation {
         type Param = (
-            SQuery<
-                (
-                    &'static mut UiTransform,
-                    &'static mut TextColor,
-                    &'static mut Visibility,
-                ),
-                With<TestAnimation>,
-            >,
+            SSingle<Write<TestTarget>, With<TestAnimation>>,
             SLocal<usize>,
         );
 
         fn domain(&self) -> Range<f32> {
-            (0.0..120.0).into()
+            (0.0..self.duration).into()
         }
 
         fn tick(
             &mut self,
             _entity: Entity,
-            _t: f32,
-            _dt: f32,
+            t: f32,
+            dt: f32,
             param: &mut StaticSystemParam<Self::Param>,
         ) {
-            let (targets, tracker) = param.deref_mut();
+            let (target, tracker) = param.deref_mut();
+            // this do-si-do is to verify i got the system param stuff in workable state
             **tracker += 1;
-            for (_transform, _color, _visibility) in targets.iter_mut() {}
+            target.local = **tracker;
+            target.t = t;
+            target.dt += dt;
         }
     }
 
     #[test]
-    fn test() {
+    fn test_basics() {
         let mut app = App::new();
         app.add_plugins((
             TimePlugin,
             EntityAnimationPlugin::<TestAnimation>::default(),
-        ));
-
+        ))
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn(TestAnimation { duration: 1.0 });
+        });
+        // back to back to back to back frames
         app.update();
+        app.update();
+        app.update();
+        app.update();
+        let mut query = app.world_mut().query::<&TestTarget>();
+        let target = dbg!(query.single(app.world()).unwrap());
+        // pretty basic test, just make sure we got called and time moves like we expect
+        // (exact times depend on the timing of calling update so we aren't going to check that, but
+        // more than zero, and dt accumulation == t checks things work as expected)
+        assert_eq!(target.local, 4);
+        assert!(target.t > 0.0);
+        assert_eq!(target.t, target.dt);
     }
 }
