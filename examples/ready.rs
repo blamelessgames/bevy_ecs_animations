@@ -50,6 +50,20 @@ impl ReadyLetter {
         )
     }
 
+    const fn scale_curve(&self) -> impl Curve<Vec2> {
+        map(
+            delay(
+                self.delay(),
+                scaled_domain(
+                    0.0,
+                    self.phase_duration(),
+                    fn_curve(-PI, TAU - PI, |t| 1.5 + f32::sin(t * 1.24) * 0.5),
+                ),
+            ),
+            |scale| Vec2::splat(scale),
+        )
+    }
+
     const fn text_color_curve(&self) -> impl Curve<Hsla> {
         map(
             delay(
@@ -91,6 +105,7 @@ impl EntityAnimation for ReadyLetter {
             return;
         };
         transform.translation = self.translation_curve().sample_clamped(t);
+        transform.scale = self.scale_curve().sample_clamped(t);
         text_color.0 = self.text_color_curve().sample_clamped(t).into();
     }
 }
@@ -105,7 +120,7 @@ fn startup(mut commands: Commands) {
     ));
 
     let text_font = TextFont {
-        font_size: FontSize::Vw(8.5),
+        font_size: FontSize::Vw(10.0),
         ..default()
     };
 
@@ -138,7 +153,7 @@ fn startup(mut commands: Commands) {
                         ..default()
                     },
                     Text(letter.into()),
-                    // just make sure it's invisible at the start
+                    // just need to make sure it's invisible at the start
                     TextColor::from(Color::BLACK),
                     text_font.clone(),
                 )
