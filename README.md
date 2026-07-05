@@ -121,7 +121,7 @@ Version numbers are set up to track Bevy compatibility, but much like Bevy this 
 
 ## Why?
 
-I wanted to prodedurally animate some text, and I found the Bevy animation plugin to be a little clunky for the task. I decided to make something focused on a different approach to creating animations, that leans into the type system and the ECS, in particular with strongly-typed queries and influence over scheduling, so animation ticking systems can be parallelized. (From what I gather Bevy ticks animation players in a system that takes mutable access to all components of all entities with animations playing, which I believe means any entity being animated is held exlusively for the duration of that system's active life)
+I wanted to procedurally animate some text, and I found the Bevy animation plugin to be a little clunky for the task. I decided to make something focused on a different approach to creating animations, that leans into the type system and the ECS, in particular with strongly-typed queries and influence over scheduling, so animation ticking systems can be parallelized. (From what I gather Bevy ticks animation players in a system that takes mutable access to all components of all entities with animations playing, which I believe means any entity being animated is held exlusively for the duration of that system's active life)
 
 ## What it doesn't do
 - no glTF support, I don't use it, so I don't even know what it would take and I doubt it'll ever come up for me
