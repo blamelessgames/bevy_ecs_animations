@@ -1,3 +1,4 @@
+//! lots of animations doing things
 use std::{f32::consts::*, ops::DerefMut, range::Range};
 
 use bevy::{
@@ -10,9 +11,7 @@ use bevy::{
 };
 use bevy_ecs_animations::{
     AnimationControl, EntityAnimation, EntityAnimationFinished, EntityAnimationPlugin,
-    PositiveFinite,
     combinators::{BoxedCurve, map, scaled_domain, scaled_output},
-    positive_finite_domain,
 };
 
 // 15 minutes oughta be enough for anybody
@@ -139,11 +138,11 @@ impl EntityAnimation for Fade {
         SQuery<Read<MeshMaterial3d<StandardMaterial>>>,
     );
 
-    fn domain(&self) -> Range<PositiveFinite> {
+    fn domain(&self) -> Range<f32> {
         match self {
             // producing a reverse domain makes time run in reverse for the animation
-            Fade::Out => positive_finite_domain(3.5, 2.1),
-            Fade::In => positive_finite_domain(0.5, 1.7),
+            Fade::Out => (3.5..2.1).into(),
+            Fade::In => (0.5..1.7).into(),
         }
     }
 
@@ -177,8 +176,8 @@ struct Spin;
 impl EntityAnimation for Spin {
     type Param = SQuery<Write<Transform>, With<Self>>;
 
-    fn domain(&self) -> Range<PositiveFinite> {
-        positive_finite_domain(0.0, 12.0)
+    fn domain(&self) -> Range<f32> {
+        (0.0..12.0).into()
     }
 
     // Animations can repeat. If you need more than 4 billion repetitions,
@@ -223,8 +222,8 @@ impl Default for Wobble {
 impl EntityAnimation for Wobble {
     type Param = SQuery<Write<Transform>, With<Self>>;
 
-    fn domain(&self) -> Range<PositiveFinite> {
-        positive_finite_domain(0.0, TOTAL_TIME)
+    fn domain(&self) -> Range<f32> {
+        (0.0..TOTAL_TIME).into()
     }
 
     fn tick(

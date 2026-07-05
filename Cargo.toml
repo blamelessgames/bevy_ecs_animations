@@ -8,7 +8,6 @@ bevy_app = { version = "0.19.0", default-features = false }
 bevy_ecs = { version = "0.19.0", default-features = false }
 bevy_math = { version = "0.19.0", default-features = false, optional = true }
 bevy_time = { version = "0.19.0", default-features = false }
-typed_floats = { version = "1.0.7" }
 
 [dev-dependencies]
 bevy = { version = "0.19.0", features = ["debug"] }

@@ -1,3 +1,4 @@
+//! basic example
 use bevy::{
     ecs::system::{StaticSystemParam, lifetimeless::*},
     prelude::*,
@@ -16,8 +17,8 @@ impl EntityAnimation for FadeIn {
 
     // define the domain your animation runs. this is in seconds
     // and it starts ticking when the component is inserted
-    fn domain(&self) -> Range<PositiveFinite> {
-        positive_finite_domain(0.0, 4.0)
+    fn domain(&self) -> Range<f32> {
+        (0.0..4.0).into()
     }
 
     // define the tick method, which will get invoked once
@@ -35,7 +36,7 @@ impl EntityAnimation for FadeIn {
         // ease functions expect unit input, so normalize t first
         let t = self.normalized_t(t);
         let alpha = EaseFunction::CubicIn.sample_unchecked(t);
-        color.0.set_alpha(alpha);
+        color.set_alpha(alpha);
     }
 }
 
@@ -52,11 +53,13 @@ fn startup(mut commands: Commands) {
     commands.spawn((
         Camera2d::default(),
         Camera {
-            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            clear_color: Color::BLACK.into(),
             ..default()
         },
     ));
     commands.spawn((
+        // inserting the component on an entity starts the animation
+        FadeIn,
         Node {
             width: percent(100.0),
             height: percent(100.0),
@@ -69,6 +72,5 @@ fn startup(mut commands: Commands) {
             ..default()
         },
         TextLayout::justify(Justify::Center),
-        FadeIn,
     ));
 }

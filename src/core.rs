@@ -17,8 +17,6 @@ use bevy_ecs::{
 };
 use bevy_time::Time;
 
-pub use typed_floats::tf32::PositiveFinite;
-
 /// Core trait to define a component as an animation.
 ///
 /// When a registered component type is added to an entity, this plugin configures internal
@@ -79,21 +77,39 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
         Update
     }
 
-    /// Overall domain of the animation timeline. Order determines animation order, this range is
-    /// ticked by the delta time of the schedule's time resource
+    /// Domain on the animation timeline where this animation actively gets ticked.
     ///
-    /// Can be longer or shorter than contained curves, their domains are not considered at all.
+    /// The animation timeline is abstractly how long a component has been inserted on
+    /// an entity. Unless an instance is paused, it will accumulate dt every frame. When
+    /// the time accumulated is contained within the domain, [Self::tick] will be invoked.
     ///
-    /// Changes to this value are noticed when a component instance is added. Once an animation
-    /// is on an entity the domain is locked.
-    fn domain(&self) -> Range<PositiveFinite>;
+    /// This can be longer or shorter than contained curves. Their domains are not considered at all,
+    /// only the value returned here.
+    ///
+    /// Domains do not need to start at 0. A higher start effectively delays when the ticking begins.
+    /// in this case your `t`` value will start then. For instance, a domain of 1.0..5.0
+    /// will start after 1 second with a `t` values from 1.0 to 5.0
+    ///
+    /// If the range is in reverse, the animation will tick backward. Elapsed time still accumulates
+    /// normally. For instance, a domain of 5.0..1.0 will start after 1 second and receive `t` values
+    /// counting from 5.0 down to 1.0.
+    ///
+    /// If the low end of the range is negative, this is treated as a delay before the tick system is
+    /// invoked, but `t` will start at 0. For instance -1.0..4.0 will delay one second, then tick from
+    /// 0.0 to 4.0.
+    ///
+    /// If the whole range is negative, the app will crash and you'll feel silly.
+    ///
+    /// Changes to this value are noticed when a component instance is inserted. Once an animation
+    /// is on an entity the domain is locked, only inserting a new instance will cause changes.
+    fn domain(&self) -> Range<f32>;
 
     /// How many times to run the animation. 0 is equivalent to starting paused, nothing will
     /// happen until some external force uses a control API to change this.
     ///
     /// Defaults to 1
     ///
-    /// Changes to this value are noticed when a component instance is added. Once an animation
+    /// Changes to this value are noticed when a component instance is inserted. Once an animation
     /// is on an entity the repetition count is locked.
     fn repetitions(&self) -> u32 {
         1
@@ -129,8 +145,9 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
 
     /// bring `t` into [0, 1] over the current domain
     fn normalized_t(&self, t: f32) -> f32 {
-        let domain = self.domain();
-        let (low, high) = (domain.start.get(), domain.end.get());
+        // negatives in the domain range are delays outside the tick domain, so we
+        // clamp those to 0.0 here
+        let (low, high) = (self.domain().start.max(0.0), self.domain().end.max(0.0));
 
         if low == high {
             0.0
@@ -140,15 +157,6 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
             (high - t) / (high - low)
         }
     }
-}
-
-/// helper to make a domain. panics if you pass a negative
-pub fn positive_finite_domain(start: f32, end: f32) -> Range<PositiveFinite> {
-    let (start, end) = PositiveFinite::try_from(start)
-        .ok()
-        .zip(PositiveFinite::try_from(end).ok())
-        .expect("no negative time in your domain");
-    (start..end).into()
 }
 
 /// a Local system param with 'static lifetime
@@ -295,7 +303,7 @@ fn entity_animation_repeated<A: EntityAnimation>(entity: Entity) -> EntityAnimat
 pub struct AnimationState {
     elapsed: f32,
     last_dt: f32,
-    domain: Range<PositiveFinite>,
+    domain: Range<f32>,
     repetitions: u32,
     repetitions_remaining: u32,
     finished: bool,
@@ -414,13 +422,19 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
 
         // we're going to cheat Time a little bit here
         let mut finished = false;
-        let start = self.state.domain.start.get(); // 3.5
-        let end = self.state.domain.end.get(); // 2.1
-        let backward = start - end; // 1.4
+        // there might be a delay to account for
+        let delay = (0.0 - self.state.domain.start.min(self.state.domain.end)).max(0.0);
+        let start = self.state.domain.start.max(0.0);
+        let end = self.state.domain.end.max(0.0);
+        let backward = start - end;
         let last_elapsed = self.state.elapsed;
         // just assume state will accumulate normally
         self.state.last_dt = dt;
-        self.state.elapsed += dt; // just hit 2.1
+        self.state.elapsed += dt;
+
+        if self.state.elapsed < delay {
+            return;
+        }
         // okay this is a little fun!
         // keep in mind, state always goes forward
         // but we make new Time instances so that
@@ -431,15 +445,15 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
             (start, end)
         };
 
-        if self.state.elapsed < min {
+        if self.state.elapsed - delay < min {
             return;
         }
-        if self.state.elapsed >= max {
+        if self.state.elapsed - delay >= max {
             // okay if we get here we have just ended
             // and we want to run with the last bit of dt
             finished = true;
             self.state.last_dt = max - last_elapsed;
-            self.state.elapsed = max;
+            self.state.elapsed = max + delay;
         }
         // now we figure out what we really mean by elapsed!
         let (elapsed, dt) = if backward > 0.0 {
@@ -450,7 +464,7 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
             (self.state.elapsed, self.state.last_dt)
         };
 
-        animation.tick(entity, elapsed, dt, param);
+        animation.tick(entity, elapsed - delay, dt, param);
 
         if finished {
             self.state.repetition_finished();
@@ -646,8 +660,8 @@ mod test {
             SLocal<usize>,
         );
 
-        fn domain(&self) -> Range<PositiveFinite> {
-            positive_finite_domain(0.0, 100.0)
+        fn domain(&self) -> Range<f32> {
+            (0.0..120.0).into()
         }
 
         fn tick(

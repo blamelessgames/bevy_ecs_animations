@@ -38,7 +38,7 @@
 //!         // ease functions expect unit input, so normalize t first
 //!         let t = self.normalized_t(t);
 //!         let alpha = EaseFunction::CubicIn.sample_unchecked(t);
-//!         color.0.set_alpha(alpha);
+//!         color.set_alpha(alpha);
 //!     }
 //! }
 //!
