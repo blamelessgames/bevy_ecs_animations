@@ -105,6 +105,17 @@ fn startup(mut commands: Commands) {
 }
 ```
 
+## Requirements
+- Bevy 0.19
+- MSRV: As this plugin follows Bevy, the Minimum Supported Rust Version (MSRV) is generally close to "the latest stable release" of Rust. If it can compile Bevy, this should also work.
+
+### Compatibility
+Generally, this plugin will track Bevy versions. Since Bevy is currently pre-1.0, this means we match minor version. Specifically:
+| bevy    | bevy-ecs-animations |
+|---------|---------------------|
+| 0.19.x  | 0.19.x              |
+
+
 ### Fair Warning
 Version numbers are set up to track Bevy compatibility, but much like Bevy this is under active development and there will be breaking changes as my needs evolve. Once the ecosystem crosses 1.0 there will be stronger guarantees.
 
@@ -115,11 +126,6 @@ I wanted to prodedurally animate some text, and I found the Bevy animation plugi
 ## What it doesn't do
 - no glTF support, I don't use it, so I don't even know what it would take and I doubt it'll ever come up for me
 - no built-in blending. If you want to apply simultaneous animations to a single property it's up to you to decide how to make that work, at least for now.
-
-## Requirements
-
-- Bevy 0.19
-- a version of Rust that Bevy supports
 
 ## Contributing
 
