@@ -20,8 +20,8 @@ cargo add bevy-ecs-animations
 ```
 
 ## Quick Start
+(see [examples/basic.rs](examples/basic.rs))
 ```rust
-// examples/basic.rs
 use bevy::{
     ecs::system::{StaticSystemParam, lifetimeless::*},
     prelude::*,
@@ -29,22 +29,22 @@ use bevy::{
 use bevy_ecs_animations::*;
 use std::range::Range;
 
-// 1. define a component and implement EntityAnimation
-
+// 1. Define a component and implement EntityAnimation
 #[derive(Component)]
 struct FadeIn;
 
 impl EntityAnimation for FadeIn {
-    // define the param your tick function receives
+    // Define the param your tick function receives,
+    // using `bevy::ecs::system::lifetimeless` helpers
     type Param = SQuery<Write<TextColor>, With<Self>>;
 
-    // define the domain your animation runs. this is in seconds
+    // Define the domain your animation runs. this is in seconds
     // and it starts ticking when the component is inserted
     fn domain(&self) -> Range<f32> {
         (0.0..4.0).into()
     }
 
-    // define the tick method, which will get invoked once
+    // Define the tick method, which will get invoked once
     // per frame until the domain is covered
     fn tick(
         &mut self,
@@ -56,14 +56,14 @@ impl EntityAnimation for FadeIn {
         let Ok(mut color) = param.get_mut(entity) else {
             return;
         };
-        // ease functions expect unit input, so normalize t first
+        // Ease functions expect unit input, so normalize t first
         let t = self.normalized_t(t);
         let alpha = EaseFunction::CubicIn.sample_unchecked(t);
         color.set_alpha(alpha);
     }
 }
 
-// 2. configure the plugin for the animation type
+// 2. Add a plugin for the animation component
 fn main() -> AppExit {
     App::new()
         .add_plugins((
@@ -76,7 +76,7 @@ fn main() -> AppExit {
         .run()
 }
 
-// 3. spawn an animation on an entity in a system
+// 3. Spawn an animation on an entity in a system
 fn startup(mut commands: Commands) {
     commands.spawn((
         Camera2d::default(),
@@ -86,8 +86,7 @@ fn startup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        // inserting the component on an entity starts the animation
-        // by default the component will be removed from the entity once the timeline is expended
+        // Inserting the component on an entity starts the animation
         FadeIn,
         Node {
             width: percent(100.0),
