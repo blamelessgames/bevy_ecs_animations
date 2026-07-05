@@ -36,48 +36,39 @@ impl ReadyLetter {
         self.delay() * (READY.len() - 1) as f32 + self.phase_duration() + 0.35
     }
 
-    const fn translation_curve(&self) -> impl Curve<Val2> {
-        map(
-            delay(
-                self.delay(),
-                scaled_domain(
-                    0.0,
-                    self.phase_duration(),
-                    fn_curve(-PI, TAU - PI, |t| f32::cos(t) * 22.0),
+    const fn transform_curve(&self) -> impl Curve<(Val2, Vec2)> {
+        delay(
+            self.delay(),
+            scaled_domain(
+                0.0,
+                self.phase_duration(),
+                zip(
+                    map(fn_curve(-PI, TAU - PI, |t| f32::cos(t) * 22.0), |y| {
+                        Val2::px(0.0, y)
+                    }),
+                    map(
+                        fn_curve(-PI, TAU - PI, |t| 1.5 + f32::sin(t * 1.24) * 0.5),
+                        |scale| Vec2::splat(scale),
+                    ),
                 ),
             ),
-            |y| Val2::px(0.0, y),
-        )
-    }
-
-    const fn scale_curve(&self) -> impl Curve<Vec2> {
-        map(
-            delay(
-                self.delay(),
-                scaled_domain(
-                    0.0,
-                    self.phase_duration(),
-                    fn_curve(-PI, TAU - PI, |t| 1.5 + f32::sin(t * 1.24) * 0.5),
-                ),
-            ),
-            |scale| Vec2::splat(scale),
         )
     }
 
     const fn text_color_curve(&self) -> impl Curve<Hsla> {
-        map(
-            delay(
-                self.delay(),
-                scaled_domain(
-                    0.0,
-                    self.phase_duration(),
+        delay(
+            self.delay(),
+            scaled_domain(
+                0.0,
+                self.phase_duration(),
+                map(
                     zip(
                         scaled_output(0.0, 360.0, EaseFunction::SmootherStepIn),
                         EaseFunction::BounceOut,
                     ),
+                    |(hue, alpha)| Hsla::new(hue, 0.5, 0.5, alpha),
                 ),
             ),
-            |(hue, alpha)| Hsla::new(hue, 0.5, 0.5, alpha),
         )
     }
 }
@@ -104,8 +95,9 @@ impl EntityAnimation for ReadyLetter {
         let Ok((mut transform, mut text_color)) = targets.get_mut(entity) else {
             return;
         };
-        transform.translation = self.translation_curve().sample_clamped(t);
-        transform.scale = self.scale_curve().sample_clamped(t);
+        let (translation, scale) = self.transform_curve().sample_clamped(t);
+        transform.translation = translation;
+        transform.scale = scale;
         text_color.0 = self.text_color_curve().sample_clamped(t).into();
     }
 }
