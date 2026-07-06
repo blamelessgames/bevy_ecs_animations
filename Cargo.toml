@@ -1,17 +1,17 @@
 [package]
-name = "bevy-ecs-animations"
+name = "bevy_ecs_animations"
 version = "0.19.0"
 edition = "2024"
 authors = ["BlamelessGames"]
 description = "An ECS-first approach to procedural animation in Bevy."
-repository = "https://github.com/blamelessgames/bevy-ecs-animations"
+repository = "https://github.com/blamelessgames/bevy_ecs_animations"
 license = "MIT OR Apache-2.0"
 keywords = ["bevy", "animation", "ecs", "procedural"]
 categories = ["game-development", "graphics"]
 readme = "README.md"
 rust-version = "1.95.0"
-documentation = "https://docs.rs/bevy-ecs-animations"
-homepage = "https://github.com/blamelessgames/bevy-ecs-animations"
+documentation = "https://docs.rs/bevy_ecs_animations"
+homepage = "https://github.com/blamelessgames/bevy_ecs_animations"
 exclude = [".github/", "all.sh"]
 
 [dependencies]
