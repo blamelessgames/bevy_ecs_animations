@@ -1,4 +1,4 @@
-# bevy-ecs-animations
+# bevy_ecs_animations
 An ECS-first approach to procedural animation in the Bevy engine, with an eye toward fine control without too much boilerplate.
 
 ## Features
@@ -17,7 +17,7 @@ An ECS-first approach to procedural animation in the Bevy engine, with an eye to
 
 ## Installation
 ```sh
-cargo add bevy-ecs-animations
+cargo add bevy_ecs_animations
 ```
 
 ## Quick Start
@@ -112,7 +112,7 @@ fn startup(mut commands: Commands) {
 
 ### Compatibility
 Generally, this plugin will track Bevy versions. Since Bevy is currently pre-1.0, this means we match minor version. Specifically:
-|bevy|bevy-ecs-animations|
+|bevy|bevy_ecs_animations|
 |-|-|
 |0.19.x|0.19.x|
 
