@@ -51,7 +51,7 @@ fn main() -> AppExit {
 // 3. Spawn an animation on an entity in a system
 fn startup(mut commands: Commands) {
     commands.spawn((
-        Camera2d::default(),
+        Camera2d,
         Camera {
             clear_color: Color::BLACK.into(),
             ..default()

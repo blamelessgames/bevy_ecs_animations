@@ -55,7 +55,7 @@ impl ReadyLetter {
                 }),
                 map(
                     fn_curve(-PI, TAU - PI, |t| 1.5 + f32::sin(t * 1.24) * 0.5),
-                    |scale| Vec2::splat(scale),
+                    Vec2::splat,
                 ),
             ),
         )
@@ -114,7 +114,7 @@ impl EntityAnimation for ReadyLetter {
 
 fn startup(mut commands: Commands) {
     commands.spawn((
-        Camera2d::default(),
+        Camera2d,
         Camera {
             clear_color: Color::BLACK.into(),
             ..default()

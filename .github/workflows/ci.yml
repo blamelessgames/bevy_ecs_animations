@@ -41,8 +41,5 @@ jobs:
       - name: Build
         run: cargo build --all-targets --all-features
 
-      - name: Test (lib + bins, no examples)
-        run: cargo test --all-targets --all-features -- --skip example_
-
-      - name: Test examples (headless)
-        run: cargo test --examples --all-features
+      - name: Test
+        run: cargo test --all-targets --all-features
