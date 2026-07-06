@@ -239,12 +239,13 @@ fn test_timekeeping() {
     }
 
     let c = AnimationConfiguration::from(4.0);
-    test(c, 0.0, 0.001102375, Some((0.0, 0.001102375, false)));
-    test(c, 0.1, 0.008, Some((0.1, 0.008, false)));
-    test(c, 0.2, 0.008, Some((0.2, 0.008, false)));
+    test(c, 0.0, 0.001102375, Some((0.001102375, 0.001102375, false)));
+    test(c, 0.1, 0.008, Some((0.108, 0.008, false)));
+    test(c, 0.2, 0.008, Some((0.208, 0.008, false)));
     // compensate for dt going past the end
-    test(c, 3.9, 1.0, Some((3.9, 0.1, true)));
-    // this doesn't handle being called after finish
+    test(c, 3.9, 1.0, Some((4.0, 0.1, true)));
+    test(c, 3.99, 1.0, Some((4.0, 0.01, true)));
+    // this doesn't get called after it reports finished
 
     let c = c.start_at(1.0);
     // it should be None the whole first second
@@ -252,12 +253,16 @@ fn test_timekeeping() {
     test(c, 0.4, 0.001102375, None);
     test(c, 0.9, 0.001102375, None);
     // exactly at start should work
-    test(c, 1.0, 0.008, Some((1.0, 0.008, false)));
-    // make sure we compensate for dt striding the start
-    test(c, 1.1, 1.0, Some((1.1, 0.1, false)));
-    test(c, 3.9, 1.0, Some((3.9, 1.0, false)));
+    test(c, 0.99, 0.01, Some((1.0, 0.01, false)));
+    // and striding the start
+    test(c, 0.9, 0.2, Some((1.1, 0.2, false)));
+    // and right after start
+    test(c, 1.0, 0.008, Some((1.008, 0.008, false)));
+    // and normal stuff
+    test(c, 1.1, 1.0, Some((2.1, 1.0, false)));
+    test(c, 3.9, 1.0, Some((4.9, 1.0, false)));
     // the end is 1 second later now
-    test(c, 4.9, 1.0, Some((4.9, 0.1, true)));
+    test(c, 4.9, 1.0, Some((5.0, 0.1, true)));
 
     // okay that works... now reverse it! which is mostly the same,
     // but t values run the other way
@@ -267,11 +272,12 @@ fn test_timekeeping() {
     test(c, 0.4, 0.001102375, None);
     test(c, 0.9, 0.001102375, None);
     // exactly at start should report back the end
-    test(c, 1.0, 0.008, Some((5.0, 0.008, false)));
+    test(c, 0.9, 0.1, Some((5.0, 0.1, false)));
+    test(c, 1.0, 0.008, Some((4.992, 0.008, false)));
     // make sure we compensate for dt striding the start, but the other way
-    test(c, 1.1, 1.0, Some((4.9, 0.1, false)));
+    test(c, 1.1, 1.0, Some((3.9, 1.0, false)));
     // and so it goes
-    test(c, 3.9, 1.0, Some((2.1, 1.0, false)));
+    test(c, 3.9, 1.0, Some((1.1, 1.0, false)));
     test(c, 4.9, 1.0, Some((1.0, 0.1, true)));
 }
 
@@ -288,18 +294,13 @@ impl AnimationConfiguration {
                 // if it's over, say so
                 if now >= end {
                     // adjust the dt
-                    Some((elapsed, (end - elapsed), true))
+                    Some((end, (end - elapsed), true))
                 // if its still before the start, say so
-                } else if elapsed < start {
+                } else if now < start {
                     None
-                // if we just started then adjust dt. have to be careful
-                // at the boundary, if elapsed somehow is exactly start
-                // (or start is 0.0) just send the dt we get back
-                } else if elapsed - start > 0.0 && elapsed - start < dt {
-                    Some((elapsed, elapsed - start, false))
-                // actually everything is great!
+                // otherwise everything is great!
                 } else {
-                    Some((elapsed, dt, false))
+                    Some((now, dt, false))
                 }
             }
             // this is basically the same thing, but we play with
@@ -309,15 +310,11 @@ impl AnimationConfiguration {
                 if now >= end {
                     Some((start, (end - elapsed), true))
                 // if its still before the start, say so
-                } else if elapsed < start {
+                } else if now < start {
                     None
-                // if we just started then were are elasped - start under end. sneaky
-                } else if elapsed - start > 0.0 && elapsed - start < dt {
-                    let dt = elapsed - start;
-                    Some((end - dt, dt, false))
                 // actually everything is great!
                 } else {
-                    Some(((end - elapsed) + start, dt, false))
+                    Some(((end - elapsed) + start - dt, dt, false))
                 }
             }
         }
@@ -971,7 +968,7 @@ mod test {
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(TestAnimation { duration: 1.0 });
         });
-        // back to back to back to back frames
+        // back to back to back to back frames. the GPU is strong with this one
         app.update();
         app.update();
         app.update();
@@ -980,7 +977,7 @@ mod test {
         let target = query.single(app.world()).unwrap();
         // pretty basic test, just make sure we got called and time moves like we expect
         // (exact times depend on the timing of calling update so we aren't going to check that, but
-        // more than zero, and dt accumulation == t checks things work as expected)
+        // more than zero, and dt accumulation ~ t checks things work as expected)
         assert_eq!(target.local, 4);
         assert!(target.t > 0.0);
         assert_float_eq!(target.t, target.dt, abs <= 0.001);
