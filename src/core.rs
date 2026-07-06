@@ -1,7 +1,6 @@
 use std::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
-    range::Range,
 };
 
 use bevy_app::{App, Plugin, Update};
@@ -12,7 +11,9 @@ use bevy_ecs::{
     lifecycle::{Insert, Remove},
     observer::On,
     schedule::{IntoScheduleConfigs, ScheduleLabel},
-    system::{Commands, Local, Query, Res, Single, StaticSystemParam, SystemParam},
+    system::{
+        Commands, Local, Query, Res, Single, StaticSystemParam, SystemParam, lifetimeless::*,
+    },
     world::{EntityWorldMut, World},
 };
 use bevy_time::Time;
@@ -73,66 +74,14 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
     ///
     /// Changes to this have no effect after initialization, so it doesn't take `&self`
     fn schedule() -> impl ScheduleLabel {
+        // i think i want to
+        // 1. move this to the plugin for smarter semantics
+        // 2. figure out how to offer even more control, like system sets or conditions
         Update
     }
 
-    /// Domain on the animation timeline where this animation actively gets ticked.
-    ///
-    /// The animation timeline is abstractly how long a component has been inserted on
-    /// an entity. Unless an instance is paused, it will accumulate dt every frame. When
-    /// the time accumulated is contained within the domain, [Self::tick] will be invoked.
-    ///
-    /// This can be longer or shorter than contained curves. Their domains are not considered at all,
-    /// only the value returned here.
-    ///
-    /// Domains do not need to start at 0. A higher start effectively delays when the ticking begins.
-    /// in this case your `t`` value will start then. For instance, a domain of 1.0..5.0
-    /// will start after 1 second with a `t` values from 1.0 to 5.0
-    ///
-    /// If the range is in reverse, the animation will tick backward. Elapsed time still accumulates
-    /// normally. For instance, a domain of 5.0..1.0 will start after 1 second and receive `t` values
-    /// counting from 5.0 down to 1.0.
-    ///
-    /// If the low end of the range is negative, this is treated as a delay before the tick system is
-    /// invoked, but `t` will start at 0. For instance -1.0..4.0 will delay one second, then tick from
-    /// 0.0 to 4.0.
-    ///
-    /// If the whole range is negative, the app will crash and you'll feel silly.
-    ///
-    /// Changes to this value are noticed when a component instance is inserted. Once an animation
-    /// is on an entity the domain is locked, only inserting a new instance will cause changes.
-    fn domain(&self) -> Range<f32>;
-
-    /// How many times to run the animation. 0 is equivalent to starting paused, nothing will
-    /// happen until some external force uses a control API to change this.
-    ///
-    /// Defaults to 1
-    ///
-    /// Changes to this value are noticed when a component instance is inserted. Once an animation
-    /// is on an entity the repetition count is locked.
-    fn repetitions(&self) -> u32 {
-        1
-    }
-
-    /// Whether to wait to start the animation, or tick right away.
-    ///
-    /// Defaults to false.
-    ///
-    /// Changes to this value are noticed when a component instance is added. Once an animation
-    /// is on an entity it will either start or it won't, that's just how time works.
-    fn start_paused(&self) -> bool {
-        false
-    }
-
-    /// Whether the plugin should remove this component once it has finished
-    ///
-    /// Defaults to true, change to false if you want to leave them around
-    ///
-    /// This method is invoked during the frame a component reaches the finished state, so it is
-    /// live.
-    fn remove_on_finish(&self) -> bool {
-        true
-    }
+    /// Returns the configuration for the animation.
+    fn configuration(&self) -> impl Into<AnimationConfiguration>;
 
     /// Called every invocation of the schedule that an instance is active
     ///
@@ -142,20 +91,331 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
     /// - `param` - [Self::Param]
     fn tick(&mut self, entity: Entity, t: f32, dt: f32, param: &mut StaticSystemParam<Self::Param>);
 
-    /// bring `t` into [0, 1] over the current domain
+    /// bring `t` into [0, 1] over the current domain of the animation
+    /// taken from configuration. Note that if you make updates to the configuration while an animation
+    /// is running, this might return nonsensical values
     fn normalized_t(&self, t: f32) -> f32 {
-        // negatives in the domain range are delays outside the tick domain, so we
-        // clamp those to 0.0 here
-        let (low, high) = (self.domain().start.max(0.0), self.domain().end.max(0.0));
+        let configuration = self.configuration().into();
+        let start = configuration.start;
+        let end = start + configuration.duration;
 
-        if low == high {
+        if start == end {
             0.0
-        } else if low < high {
-            (t - low) / (high - low)
         } else {
-            (high - t) / (high - low)
+            (t - start) / (end - start)
         }
     }
+}
+
+/// Encapsulates the configuration for an animation. Construct using the [From]
+/// implementation for f32, which supplies the duration, the minimal requirement.
+///
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0); // 4 seconds. must not be negative!
+/// ```
+///
+/// Most of this is directed toward configuring a timeline for the animation.
+/// The simplest case is just supplying a duration. Your animation will run from `0.0->duration`,
+/// your [tick](EntityAnimation::tick) method will get t values over that range, then the plugin will
+/// trigger a finished event, remove the animation (and associated state) from the entity, and that's that.
+///
+/// You can do a lot more.
+///
+/// The animation usually starts when the timeline starts, at 0.0 seconds. You can set a different
+/// start time if you need one. The animation will begin receiving ticks when the timeline
+/// reaches this start time, and it will continue ticking for `duration` seconds, so your
+/// tick method will receive t values running from `start->duration + start`
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).start_at(2.0);
+/// ```
+/// You can also delay the timeline. The delay counts down before the timeline starts. Nothing about your ticks
+/// changes, except the plugin doesn't start your timeline for `delay` seconds.
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).delay_by(2.0);
+/// ```
+/// So by default, the timeline starts immediately, sending ticks to your tick method,
+/// and it gets t values running from `0.0->duration`, and you can move this around.
+///
+/// So far the animation has always run forward, but you can also run in reverse.
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).play_in_reverse();
+/// ```
+/// This bears some explanation. Your tick method will now receive t values in reverse order,
+/// but everything else proceeds forward (time's arrow is uncompromising on this). What this means is first,
+/// any delay counts down, then the timeline ticks silently for `start` seconds, then your tick method will
+/// be invoked, receiving t values from `start + duration->start`.
+///
+/// By default, animations have 1 repetition, but you can ask for more.
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).repeat(2); // or more!
+/// ```
+/// This is pretty straightforward - after the delay expires, the timeline is run for as many repetitions as you configure
+///
+/// You can also set a count of 0, which means the animation will not play until you intervene somehow. However, if you simply
+/// want to start the animation paused, you can configure that.
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).start_paused(true);
+/// ```
+/// In this case, you'll have to use a [command](AnimationCommands) or [AnimationController] to unpause it before anything animates.
+///
+/// You can also configure how the plugin behaves when an animation finishes, which means that the animation has
+/// run through its entire timeline as many times as it has been configured to repeat. By default, the plugin will trigger
+/// [EntityAnimationRepeated] when an animation finishes a repetition, and [EntityAnimationFinished] when the overall animation
+/// is finished. You can disable this, if you don't care about the events (and maybe have so many animations running the overhead matters).
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).trigger_events(false);
+/// ```
+///
+/// The plugin will also do a little cleanup for you. By default, the animation component (and associated internal state) will be
+/// removed from the entity on finish. This causes an archetype move and also means you cannot reset the animation or read the state.
+/// If you prefer, you can have the plugin do nothing (which means it can be restarted via [commands](AnimationCommands) or an
+/// [AnimationController])
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).remove_nothing();
+/// ```
+///
+/// You can also have the plugin despawn the containing entity
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).despawn_entity();
+/// ```
+///
+/// If for some reason you want the default back, it's here
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).remove_animation();
+/// ```
+///
+/// That's it so far!
+#[derive(Debug, Copy, Clone)]
+pub struct AnimationConfiguration {
+    duration: f32,
+    start: f32,
+    delay: f32,
+    mode: PlaybackMode,
+    repetitions: u32,
+    paused: bool,
+    events: bool,
+    removal: RemovalOptions,
+}
+
+impl From<f32> for AnimationConfiguration {
+    fn from(duration: f32) -> Self {
+        debug_assert!(duration >= 0.0, "negative durations cannot be set");
+        Self {
+            duration,
+            start: 0.0,
+            delay: 0.0,
+            mode: Default::default(),
+            repetitions: 1,
+            paused: false,
+            events: true,
+            removal: Default::default(),
+        }
+    }
+}
+
+#[test]
+fn test_timekeeping() {
+    use float_eq::assert_float_eq;
+    fn test(c: AnimationConfiguration, elapsed: f32, dt: f32, expected: Option<(f32, f32, bool)>) {
+        let Some((elapsed, dt, done)) = c.t(elapsed, dt) else {
+            assert_eq!(expected, None);
+            return;
+        };
+        let (e_elapsed, e_dt, e_done) = expected.expect("expected None!");
+        // millisecond precision seems fine?
+        assert_float_eq!(e_elapsed, elapsed, abs <= 0.001);
+        assert_float_eq!(e_dt, dt, abs <= 0.001);
+        assert_eq!(e_done, done);
+    }
+
+    let c = AnimationConfiguration::from(4.0);
+    test(c, 0.0, 0.001102375, Some((0.0, 0.001102375, false)));
+    test(c, 0.1, 0.008, Some((0.1, 0.008, false)));
+    test(c, 0.2, 0.008, Some((0.2, 0.008, false)));
+    // compensate for dt going past the end
+    test(c, 3.9, 1.0, Some((3.9, 0.1, true)));
+    // this doesn't handle being called after finish
+
+    let c = c.start_at(1.0);
+    // it should be None the whole first second
+    test(c, 0.0, 0.001102375, None);
+    test(c, 0.4, 0.001102375, None);
+    test(c, 0.9, 0.001102375, None);
+    // exactly at start should work
+    test(c, 1.0, 0.008, Some((1.0, 0.008, false)));
+    // make sure we compensate for dt striding the start
+    test(c, 1.1, 1.0, Some((1.1, 0.1, false)));
+    test(c, 3.9, 1.0, Some((3.9, 1.0, false)));
+    // the end is 1 second later now
+    test(c, 4.9, 1.0, Some((4.9, 0.1, true)));
+
+    // okay that works... now reverse it! which is mostly the same,
+    // but t values run the other way
+    let c = c.play_in_reverse();
+    // should still not care during the first second
+    test(c, 0.0, 0.001102375, None);
+    test(c, 0.4, 0.001102375, None);
+    test(c, 0.9, 0.001102375, None);
+    // exactly at start should report back the end
+    test(c, 1.0, 0.008, Some((5.0, 0.008, false)));
+    // make sure we compensate for dt striding the start, but the other way
+    test(c, 1.1, 1.0, Some((4.9, 0.1, false)));
+    // and so it goes
+    test(c, 3.9, 1.0, Some((2.1, 1.0, false)));
+    test(c, 4.9, 1.0, Some((1.0, 0.1, true)));
+}
+
+impl AnimationConfiguration {
+    /// handles the logic of turning last frame's elapsed time + this frame's dt into t and dt values
+    /// for the animation's tick method, and also determines if it finished, or if there's no reason
+    /// to tick
+    fn t(&self, elapsed: f32, dt: f32) -> Option<(f32, f32, bool)> {
+        let start = self.start;
+        let end = start + self.duration;
+        let now = elapsed + dt;
+        match self.mode {
+            PlaybackMode::Forward => {
+                // if it's over, say so
+                if now >= end {
+                    // adjust the dt
+                    Some((elapsed, (end - elapsed), true))
+                // if its still before the start, say so
+                } else if elapsed < start {
+                    None
+                // if we just started then adjust dt. have to be careful
+                // at the boundary, if elapsed somehow is exactly start
+                // (or start is 0.0) just send the dt we get back
+                } else if elapsed - start > 0.0 && elapsed - start < dt {
+                    Some((elapsed, elapsed - start, false))
+                // actually everything is great!
+                } else {
+                    Some((elapsed, dt, false))
+                }
+            }
+            // this is basically the same thing, but we play with
+            // the output
+            PlaybackMode::Reverse => {
+                // if it's over, say so
+                if now >= end {
+                    Some((start, (end - elapsed), true))
+                // if its still before the start, say so
+                } else if elapsed < start {
+                    None
+                // if we just started then were are elasped - start under end. sneaky
+                } else if elapsed - start > 0.0 && elapsed - start < dt {
+                    let dt = elapsed - start;
+                    Some((end - dt, dt, false))
+                // actually everything is great!
+                } else {
+                    Some(((end - elapsed) + start, dt, false))
+                }
+            }
+        }
+    }
+}
+
+impl AnimationConfiguration {
+    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds.
+    ///
+    /// Defaults to 0.0
+    ///
+    /// Must not be negative.
+    pub fn start_at(mut self, start: f32) -> Self {
+        debug_assert!(start >= 0.0, "start cannot be negative");
+        self.start = start;
+        self
+    }
+
+    /// Seconds to "tick off" the timeline before it officially starts.
+    ///
+    pub fn delay_by(mut self, delay: f32) -> Self {
+        debug_assert!(delay >= 0.0, "delay cannot be negative");
+        self.delay = delay;
+        self
+    }
+
+    /// Play the animation in forward order
+    ///
+    /// This is the default
+    pub fn play_forward(mut self) -> Self {
+        self.mode = PlaybackMode::Forward;
+        self
+    }
+
+    /// Play the animation in reverse
+    pub fn play_in_reverse(mut self) -> Self {
+        self.mode = PlaybackMode::Reverse;
+        self
+    }
+
+    /// set repetition count. 0 is valid but results in an animation that finishes
+    /// immediately
+    pub fn repeat(mut self, repetitions: u32) -> Self {
+        self.repetitions = repetitions;
+        self
+    }
+
+    /// pass `true` to pause at start, doing nothing until you intervene
+    ///
+    /// default is `false`
+    pub fn start_paused(mut self, paused: bool) -> Self {
+        self.paused = paused;
+        self
+    }
+
+    /// pass `false` to disable triggering documented events
+    ///
+    /// default is `true`
+    pub fn trigger_events(mut self, events: bool) -> Self {
+        self.events = events;
+        self
+    }
+
+    /// When the animation is finished, remove the component + internal state from the entity
+    ///
+    /// this is the default.
+    pub fn remove_animation(mut self) -> Self {
+        self.removal = RemovalOptions::Component;
+        self
+    }
+
+    /// When the animation is finished, despawn the entity
+    pub fn despawn_entity(mut self) -> Self {
+        self.removal = RemovalOptions::Entity;
+        self
+    }
+
+    /// When the animation is finished, leave everything sitting there. Animations can be
+    /// restarted with (commands)[AnimationCommands] or an [AnimationController]
+    pub fn remove_nothing(mut self) -> Self {
+        self.removal = RemovalOptions::Nothing;
+        self
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+enum PlaybackMode {
+    #[default]
+    Forward,
+    Reverse,
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+enum RemovalOptions {
+    #[default]
+    Component,
+    Entity,
+    Nothing,
 }
 
 /// a [Local] system param with 'static lifetime
@@ -166,7 +426,7 @@ pub type SSingle<D, F> = Single<'static, 'static, D, F>;
 
 /// Command interface to control animations commands-style. if you want something
 /// more immediate, use AnimationController as a system parameter
-pub trait AnimationControl {
+pub trait AnimationCommands {
     fn restart<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self;
 
     fn restart_all<A: EntityAnimation>(&mut self) -> &mut Self;
@@ -239,22 +499,29 @@ impl<A: EntityAnimation> EntityAnimationPlugin<A> {
 
             state.tick(time.delta_secs(), entity, &mut *animation, &mut param);
 
-            if state.just_repeated() {
+            if state.just_repeated() && state.configuration.events {
                 commands
                     .entity(entity)
                     .trigger(entity_animation_repeated::<A>);
             }
 
             if state.finished() {
-                commands
-                    .entity(entity)
-                    .trigger(entity_animation_finished::<A>);
-                if animation.remove_on_finish() {
+                if state.configuration.events {
                     commands
                         .entity(entity)
-                        .queue_silenced(|mut entity: EntityWorldMut| {
-                            entity.remove::<A>();
-                        });
+                        .trigger(entity_animation_finished::<A>);
+                }
+                // we aren't quiet about these moves because they're in the public API,
+                // so we should warn on things going wrong since that's the user asking
+                // for the wrong thing
+                match state.configuration.removal {
+                    RemovalOptions::Component => {
+                        commands.entity(entity).remove::<A>();
+                    }
+                    RemovalOptions::Entity => {
+                        commands.entity(entity).despawn();
+                    }
+                    RemovalOptions::Nothing => { /* just so */ }
                 }
             }
         }
@@ -306,15 +573,27 @@ fn entity_animation_repeated<A: EntityAnimation>(entity: Entity) -> EntityAnimat
 }
 
 /// The state of the animation. Users are free to inspect it!
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct AnimationState {
     elapsed: f32,
     last_dt: f32,
-    domain: Range<f32>,
-    repetitions: u32,
     repetitions_remaining: u32,
     finished: bool,
     paused: bool,
+    configuration: AnimationConfiguration,
+}
+
+impl Default for AnimationState {
+    fn default() -> Self {
+        Self {
+            elapsed: 0.0,
+            last_dt: 0.0,
+            repetitions_remaining: 0,
+            finished: false,
+            paused: false,
+            configuration: (0.0).into(),
+        }
+    }
 }
 
 impl AnimationState {
@@ -340,7 +619,7 @@ impl AnimationState {
     }
 
     pub const fn repetitions(&self) -> u32 {
-        self.repetitions
+        self.configuration.repetitions
     }
 
     pub const fn repetitions_remaining(&self) -> u32 {
@@ -364,9 +643,13 @@ impl<A> From<&EntityAnimationState<A>> for AnimationState {
 
 #[derive(Component, Clone, Copy)]
 struct EntityAnimationState<A> {
+    // the public part of the state
     state: AnimationState,
+    // the elapsed timer for delays
+    delay: f32,
+    // if the animation just repeated
     just_repeated: bool,
-    _marker: PhantomData<fn() -> A>,
+    _animation: PhantomData<fn() -> A>,
 }
 
 impl<A> Deref for EntityAnimationState<A> {
@@ -387,8 +670,9 @@ impl<A> Default for EntityAnimationState<A> {
     fn default() -> Self {
         EntityAnimationState {
             state: Default::default(),
+            delay: 0.0,
             just_repeated: false,
-            _marker: PhantomData,
+            _animation: PhantomData,
         }
     }
 }
@@ -405,14 +689,16 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
     }
 
     fn reset(&mut self, animation: &A) {
+        let configuration = animation.configuration().into();
+        self.delay = 0.0;
+        self.just_repeated = false;
         self.state = AnimationState {
             elapsed: 0.0,
             last_dt: 0.0,
-            domain: animation.domain(),
-            repetitions: animation.repetitions(),
-            repetitions_remaining: animation.repetitions(),
-            finished: animation.repetitions() == 0,
-            paused: animation.start_paused(),
+            repetitions_remaining: configuration.repetitions,
+            finished: configuration.repetitions == 0,
+            paused: configuration.paused,
+            configuration,
         };
     }
 
@@ -423,55 +709,38 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
         animation: &mut A,
         param: &mut StaticSystemParam<<A as EntityAnimation>::Param>,
     ) {
+        // paused and finished animations do nothing
         if self.state.paused || self.state.finished {
             return;
         }
 
-        // we're going to cheat Time a little bit here
-        let mut finished = false;
-        // there might be a delay to account for
-        let delay = (0.0 - self.state.domain.start.min(self.state.domain.end)).max(0.0);
-        let start = self.state.domain.start.max(0.0);
-        let end = self.state.domain.end.max(0.0);
-        let backward = start - end;
-        let last_elapsed = self.state.elapsed;
-        // just assume state will accumulate normally
+        // first, treat delay as being entirely outside the timeline
+        // return until we've sunk it all, be sure to account for leftover dt
+        // this behavior may become configurable
+        let delay = self.configuration.delay;
+        let mut leftover_dt = 0.0;
+        if self.delay < delay {
+            self.delay += dt;
+            if self.delay >= delay {
+                leftover_dt += delay - self.delay;
+            } else {
+                return;
+            }
+        }
+        let dt = dt + leftover_dt;
+
+        // now we get to  ask configuration for what really happened!
+        let Some((t, dt, finished)) = self.state.configuration.t(self.state.elapsed, dt) else {
+            // if None, we're outside the ticking range, just accumulate
+            self.state.last_dt = dt;
+            self.state.elapsed += dt;
+            return;
+        };
+        // otherwise accumulate what might be trimmed
         self.state.last_dt = dt;
         self.state.elapsed += dt;
 
-        if self.state.elapsed < delay {
-            return;
-        }
-        // okay this is a little fun!
-        // keep in mind, state always goes forward
-        // but we make new Time instances so that
-        // can go backward
-        let (min, max) = if backward > 0.0 {
-            (end, start)
-        } else {
-            (start, end)
-        };
-
-        if self.state.elapsed - delay < min {
-            return;
-        }
-        if self.state.elapsed - delay >= max {
-            // okay if we get here we have just ended
-            // and we want to run with the last bit of dt
-            finished = true;
-            self.state.last_dt = max - last_elapsed;
-            self.state.elapsed = max + delay;
-        }
-        // now we figure out what we really mean by elapsed!
-        let (elapsed, dt) = if backward > 0.0 {
-            let elapsed = (start + end) - self.state.elapsed;
-            (elapsed, self.state.last_dt)
-        } else {
-            // very simple in forward!
-            (self.state.elapsed, self.state.last_dt)
-        };
-
-        animation.tick(entity, elapsed - delay, dt, param);
+        animation.tick(entity, t, dt, param);
 
         if finished {
             self.state.repetition_finished();
@@ -482,13 +751,23 @@ impl<A: EntityAnimation> EntityAnimationState<A> {
 /// control all aspects of animations, immediately
 #[derive(SystemParam)]
 pub struct AnimationController<'w, 's, A: EntityAnimation> {
-    animations: Query<'w, 's, (&'static mut A, &'static mut EntityAnimationState<A>)>,
+    animations: Query<'w, 's, (Write<A>, Write<EntityAnimationState<A>>)>,
 }
 
-pub type SAnimationController<A> =
-    StaticSystemParam<'static, 'static, AnimationController<'static, 'static, A>>;
+pub type SAnimationController<A> = AnimationController<'static, 'static, A>;
 
 impl<'w, 's, A: EntityAnimation> AnimationController<'w, 's, A> {
+    pub fn finished(&self, entity: Entity) -> Option<bool> {
+        self.animations
+            .get(entity)
+            .ok()
+            .map(|(_, state)| state.finished)
+    }
+
+    pub fn all_finished(&self) -> bool {
+        self.animations.iter().all(|(_, state)| state.finished)
+    }
+
     pub fn state(&mut self, entity: Entity) -> Option<AnimationState> {
         self.animations
             .get(entity)
@@ -553,7 +832,7 @@ impl<'w, 's, A: EntityAnimation> AnimationController<'w, 's, A> {
     }
 }
 
-impl AnimationControl for Commands<'_, '_> {
+impl AnimationCommands for Commands<'_, '_> {
     fn restart<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self {
         self.queue(move |world: &mut World| {
             let mut query = world.query::<(&mut EntityAnimationState<A>, &A)>();
@@ -577,33 +856,27 @@ impl AnimationControl for Commands<'_, '_> {
 
     fn flip_pause<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self {
         self.queue(move |world: &mut World| {
-            world
-                .get_mut::<EntityAnimationState<A>>(entity)
-                .map(|mut state| {
-                    state.paused = !state.paused;
-                });
+            if let Some(mut state) = world.get_mut::<EntityAnimationState<A>>(entity) {
+                state.paused = !state.paused;
+            }
         });
         self
     }
 
     fn pause<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self {
         self.queue(move |world: &mut World| {
-            world
-                .get_mut::<EntityAnimationState<A>>(entity)
-                .map(|mut state| {
-                    state.paused = true;
-                });
+            if let Some(mut state) = world.get_mut::<EntityAnimationState<A>>(entity) {
+                state.paused = true;
+            }
         });
         self
     }
 
     fn unpause<A: EntityAnimation>(&mut self, entity: Entity) -> &mut Self {
         self.queue(move |world: &mut World| {
-            world
-                .get_mut::<EntityAnimationState<A>>(entity)
-                .map(|mut state| {
-                    state.paused = false;
-                });
+            if let Some(mut state) = world.get_mut::<EntityAnimationState<A>>(entity) {
+                state.paused = false;
+            }
         });
         self
     }
@@ -640,12 +913,13 @@ impl AnimationControl for Commands<'_, '_> {
 }
 
 #[cfg(test)]
+#[allow(refining_impl_trait)]
 mod test {
+    use float_eq::assert_float_eq;
     use std::ops::DerefMut;
 
     use super::*;
     use bevy::prelude::*;
-    use bevy_ecs::system::lifetimeless::*;
     use bevy_time::TimePlugin;
 
     #[derive(Component)]
@@ -667,8 +941,8 @@ mod test {
             SLocal<usize>,
         );
 
-        fn domain(&self) -> Range<f32> {
-            (0.0..self.duration).into()
+        fn configuration(&self) -> f32 {
+            self.duration
         }
 
         fn tick(
@@ -703,13 +977,13 @@ mod test {
         app.update();
         app.update();
         let mut query = app.world_mut().query::<&TestTarget>();
-        let target = dbg!(query.single(app.world()).unwrap());
+        let target = query.single(app.world()).unwrap();
         // pretty basic test, just make sure we got called and time moves like we expect
         // (exact times depend on the timing of calling update so we aren't going to check that, but
         // more than zero, and dt accumulation == t checks things work as expected)
         assert_eq!(target.local, 4);
         assert!(target.t > 0.0);
-        assert_eq!(target.t, target.dt);
+        assert_float_eq!(target.t, target.dt, abs <= 0.001);
     }
 
     // need to verify more!

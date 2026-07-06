@@ -21,6 +21,7 @@ bevy_time = { version = "0.19.0", default-features = false }
 
 [dev-dependencies]
 bevy = { version = "0.19.0", features = ["debug"] }
+float_eq = "1.0.1"
 
 [features]
 # probably will move the combinators to a separate crate

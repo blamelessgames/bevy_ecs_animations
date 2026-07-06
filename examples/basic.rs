@@ -4,7 +4,6 @@ use bevy::{
     prelude::*,
 };
 use bevy_ecs_animations::*;
-use std::range::Range;
 
 // 1. Define a component and implement EntityAnimation
 #[derive(Component)]
@@ -15,10 +14,11 @@ impl EntityAnimation for FadeIn {
     // using `bevy::ecs::system::lifetimeless` helpers
     type Param = SQuery<Write<TextColor>, With<Self>>;
 
-    // Define the domain your animation runs. this is in seconds
-    // and it starts ticking when the component is inserted
-    fn domain(&self) -> Range<f32> {
-        (0.0..4.0).into()
+    // animations require a configuration, minimally a duration
+    // since f32 implements Into<AnimationConfiguration> and takes it as the duration,
+    // you can just return that if you're happy with defaults
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
+        4.0
     }
 
     // Define the tick method, which will get invoked once

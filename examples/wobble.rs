@@ -1,5 +1,5 @@
 //! lots of animations doing things
-use std::{f32::consts::*, ops::DerefMut, range::Range};
+use std::{f32::consts::*, ops::DerefMut};
 
 use bevy::{
     color::palettes::css::*,
@@ -10,7 +10,8 @@ use bevy::{
     prelude::*,
 };
 use bevy_ecs_animations::{
-    AnimationControl, EntityAnimation, EntityAnimationFinished, EntityAnimationPlugin,
+    AnimationCommands, AnimationConfiguration, EntityAnimation, EntityAnimationFinished,
+    EntityAnimationPlugin,
     combinators::{BoxedCurve, map, scaled_output},
 };
 
@@ -138,17 +139,14 @@ impl EntityAnimation for Fade {
         SQuery<Read<MeshMaterial3d<StandardMaterial>>>,
     );
 
-    fn domain(&self) -> Range<f32> {
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
         match self {
-            // producing a reverse domain makes time run in reverse for the animation
-            Fade::Out => (3.5..2.1).into(),
-            Fade::In => (0.5..1.7).into(),
+            Fade::Out => AnimationConfiguration::from(1.4)
+                .start_at(2.1)
+                .play_in_reverse()
+                .remove_nothing(),
+            Fade::In => AnimationConfiguration::from(1.2).start_at(0.5),
         }
-    }
-
-    fn remove_on_finish(&self) -> bool {
-        // we want to stick around after Fade::Out
-        *self == Fade::In
     }
 
     fn tick(&mut self, entity: Entity, t: f32, _: f32, param: &mut StaticSystemParam<Self::Param>) {
@@ -176,15 +174,8 @@ struct Spin;
 impl EntityAnimation for Spin {
     type Param = SQuery<Write<Transform>, With<Self>>;
 
-    fn domain(&self) -> Range<f32> {
-        (0.0..12.0).into()
-    }
-
-    // Animations can repeat. If you need more than 4 billion repetitions,
-    // I'm sorry, you'll have to work for it.
-    // If you're just offended by using u32::MAX to mean forever, I sympathize deeply
-    fn repetitions(&self) -> u32 {
-        (TOTAL_TIME / 12.0) as u32
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
+        AnimationConfiguration::from(12.0).repeat((TOTAL_TIME / 12.0) as u32)
     }
 
     fn tick(
@@ -210,7 +201,7 @@ struct Wobble(BoxedCurve<Dir3>);
 impl Default for Wobble {
     fn default() -> Self {
         Wobble(Box::new(map(
-            scaled_output(TAU * -20.0, TAU * 20.0, EaseFunction::CircularInOut),
+            scaled_output(TAU * -10.0, TAU * 10.0, EaseFunction::CircularInOut),
             |angle| Dir3::new_unchecked(Dir3::X.rotate_z(angle).normalize()),
         )))
     }
@@ -218,8 +209,8 @@ impl Default for Wobble {
 impl EntityAnimation for Wobble {
     type Param = SQuery<Write<Transform>, With<Self>>;
 
-    fn domain(&self) -> Range<f32> {
-        (0.0..TOTAL_TIME).into()
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
+        TOTAL_TIME
     }
 
     fn tick(

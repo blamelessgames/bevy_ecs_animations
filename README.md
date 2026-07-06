@@ -39,10 +39,11 @@ impl EntityAnimation for FadeIn {
     // using `bevy::ecs::system::lifetimeless` helpers
     type Param = SQuery<Write<TextColor>, With<Self>>;
 
-    // Define the domain your animation runs. this is in seconds
-    // and it starts ticking when the component is inserted
-    fn domain(&self) -> Range<f32> {
-        (0.0..4.0).into()
+    // animations require a configuration, minimally a duration
+    // since f32 implements Into<AnimationConfiguration> and takes it as the duration,
+    // you can just return that if you're happy with defaults
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
+        4.0
     }
 
     // Define the tick method, which will get invoked once
@@ -107,7 +108,7 @@ fn startup(mut commands: Commands) {
 
 ## Requirements
 - Bevy 0.19
-- MSRV: As this plugin follows Bevy, the Minimum Supported Rust Version (MSRV) is generally close to "the latest stable release" of Rust. If it can compile Bevy, this should also work.
+- MSRV: 1.95.0. This plugin will generally follow Bevy's lead here
 
 ### Compatibility
 Generally, this plugin will track Bevy versions. Since Bevy is currently pre-1.0, this means we match minor version. Specifically:
