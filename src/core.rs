@@ -41,8 +41,25 @@ use bevy_time::Time;
 /// well-suited to sampling some source of animation parameters and setting them where they can have
 /// impacts on the game world.
 pub trait EntityAnimation: Component<Mutability = Mutable> {
-    /// Define the [SystemParam] for the [tick](EntityAnimation::tick) method.
+    /// Define the [SystemParam] for the [tick](EntityAnimation::tick) method. The syntax is very similar
+    /// to the way system function arguments are specified, but the lifetimes are explicit and
+    /// must be `'static`
     ///
+    /// For example:
+    /// ```ignore
+    /// #[derive(Component)]
+    /// struct Animation;
+    ///
+    /// impl EntityAnimation for Animation { ... }  
+    ///
+    /// fn tick(
+    ///     mut transforms: Query<&mut Transform, With<Animation>>,
+    ///     other: Query<&Transform, With<Animation>>,
+    ///     mut commands: Commands,
+    ///     mut size: Local<usize>
+    /// ) { ... }
+    /// ```
+    /// is getting the same arguments as
     /// ```ignore
     /// type Param: (
     ///     SQuery(Write(Transform), With<Self>),
@@ -52,7 +69,7 @@ pub trait EntityAnimation: Component<Mutability = Mutable> {
     /// );
     /// ```
     ///
-    /// Two things
+    /// Two things to watch out for
     /// 1. do not include the `Self` component in the query ([Self::tick] is `&mut self` so no
     ///    need internally, and there is another means of cross-instance communication) except
     ///    as a filter.
@@ -209,6 +226,40 @@ pub struct AnimationConfiguration {
 
 impl From<f32> for AnimationConfiguration {
     fn from(duration: f32) -> Self {
+        Self::duration(duration)
+    }
+}
+
+impl AnimationConfiguration {
+    /// handles the logic of turning last frame's elapsed time + this frame's dt into t and dt values
+    /// for the animation's tick method, and also determines if it finished, or if there's no reason
+    /// to tick
+    fn t(&self, elapsed: f32, dt: f32) -> Option<(f32, f32, bool)> {
+        let start = self.start;
+        let end = start + self.duration;
+        let now = elapsed + dt;
+        let (produced_now, produced_end) = match self.mode {
+            PlaybackMode::Forward => (now, end),
+            PlaybackMode::Reverse => ((end - elapsed) + start - dt, start),
+        };
+
+        // if it's over, say so
+        if now >= end {
+            // adjust the dt
+            Some((produced_end, (end - elapsed), true))
+        // if its still before the start, say so
+        } else if now < start {
+            None
+        // otherwise everything is great!
+        } else {
+            Some((produced_now, dt, false))
+        }
+    }
+}
+
+impl AnimationConfiguration {
+    /// Create a new configuration with a duration
+    pub fn duration(duration: f32) -> Self {
         debug_assert!(duration >= 0.0, "negative durations cannot be set");
         Self {
             duration,
@@ -221,107 +272,7 @@ impl From<f32> for AnimationConfiguration {
             removal: Default::default(),
         }
     }
-}
 
-#[test]
-fn test_timekeeping() {
-    use float_eq::assert_float_eq;
-    fn test(c: AnimationConfiguration, elapsed: f32, dt: f32, expected: Option<(f32, f32, bool)>) {
-        let Some((elapsed, dt, done)) = c.t(elapsed, dt) else {
-            assert_eq!(expected, None);
-            return;
-        };
-        let (e_elapsed, e_dt, e_done) = expected.expect("expected None!");
-        // millisecond precision seems fine?
-        assert_float_eq!(e_elapsed, elapsed, abs <= 0.001);
-        assert_float_eq!(e_dt, dt, abs <= 0.001);
-        assert_eq!(e_done, done);
-    }
-
-    let c = AnimationConfiguration::from(4.0);
-    test(c, 0.0, 0.001102375, Some((0.001102375, 0.001102375, false)));
-    test(c, 0.1, 0.008, Some((0.108, 0.008, false)));
-    test(c, 0.2, 0.008, Some((0.208, 0.008, false)));
-    // compensate for dt going past the end
-    test(c, 3.9, 1.0, Some((4.0, 0.1, true)));
-    test(c, 3.99, 1.0, Some((4.0, 0.01, true)));
-    // this doesn't get called after it reports finished
-
-    let c = c.start_at(1.0);
-    // it should be None the whole first second
-    test(c, 0.0, 0.001102375, None);
-    test(c, 0.4, 0.001102375, None);
-    test(c, 0.9, 0.001102375, None);
-    // exactly at start should work
-    test(c, 0.99, 0.01, Some((1.0, 0.01, false)));
-    // and striding the start
-    test(c, 0.9, 0.2, Some((1.1, 0.2, false)));
-    // and right after start
-    test(c, 1.0, 0.008, Some((1.008, 0.008, false)));
-    // and normal stuff
-    test(c, 1.1, 1.0, Some((2.1, 1.0, false)));
-    test(c, 3.9, 1.0, Some((4.9, 1.0, false)));
-    // the end is 1 second later now
-    test(c, 4.9, 1.0, Some((5.0, 0.1, true)));
-
-    // okay that works... now reverse it! which is mostly the same,
-    // but t values run the other way
-    let c = c.play_in_reverse();
-    // should still not care during the first second
-    test(c, 0.0, 0.001102375, None);
-    test(c, 0.4, 0.001102375, None);
-    test(c, 0.9, 0.001102375, None);
-    // exactly at start should report back the end
-    test(c, 0.9, 0.1, Some((5.0, 0.1, false)));
-    test(c, 1.0, 0.008, Some((4.992, 0.008, false)));
-    // make sure we compensate for dt striding the start, but the other way
-    test(c, 1.1, 1.0, Some((3.9, 1.0, false)));
-    // and so it goes
-    test(c, 3.9, 1.0, Some((1.1, 1.0, false)));
-    test(c, 4.9, 1.0, Some((1.0, 0.1, true)));
-}
-
-impl AnimationConfiguration {
-    /// handles the logic of turning last frame's elapsed time + this frame's dt into t and dt values
-    /// for the animation's tick method, and also determines if it finished, or if there's no reason
-    /// to tick
-    fn t(&self, elapsed: f32, dt: f32) -> Option<(f32, f32, bool)> {
-        let start = self.start;
-        let end = start + self.duration;
-        let now = elapsed + dt;
-        match self.mode {
-            PlaybackMode::Forward => {
-                // if it's over, say so
-                if now >= end {
-                    // adjust the dt
-                    Some((end, (end - elapsed), true))
-                // if its still before the start, say so
-                } else if now < start {
-                    None
-                // otherwise everything is great!
-                } else {
-                    Some((now, dt, false))
-                }
-            }
-            // this is basically the same thing, but we play with
-            // the output
-            PlaybackMode::Reverse => {
-                // if it's over, say so
-                if now >= end {
-                    Some((start, (end - elapsed), true))
-                // if its still before the start, say so
-                } else if now < start {
-                    None
-                // actually everything is great!
-                } else {
-                    Some(((end - elapsed) + start - dt, dt, false))
-                }
-            }
-        }
-    }
-}
-
-impl AnimationConfiguration {
     /// Set a start point on the animation's timeline when this animation begins ticking, in seconds.
     ///
     /// Defaults to 0.0
@@ -470,7 +421,8 @@ impl<A: EntityAnimation> Plugin for EntityAnimationPlugin<A> {
                 .chain(),
         )
         .add_observer(on_insert::<A>)
-        .add_observer(on_remove::<A>);
+        .add_observer(on_remove::<A>)
+        .register_required_components::<A, EntityAnimationState<A>>();
     }
 }
 
@@ -527,21 +479,19 @@ impl<A: EntityAnimation> EntityAnimationPlugin<A> {
 
 fn on_insert<A: EntityAnimation>(
     add_animation: On<Insert, A>,
-    mut commands: Commands,
-    animations: Query<&A>,
+    mut animations: Query<(&A, &mut EntityAnimationState<A>)>,
 ) {
     // this serves as the initialization phase
-    let Ok(animation) = animations.get(add_animation.entity) else {
+    let Ok((animation, mut state)) = animations.get_mut(add_animation.entity) else {
         return;
     };
-    let mut state = EntityAnimationState::<A>::default();
     state.reset(animation);
-    commands.entity(add_animation.entity).insert(state);
 }
 
 fn on_remove<A: EntityAnimation>(state: On<Remove, A>, mut commands: Commands) {
     commands
         .entity(state.entity)
+        // silenced because if this was a despawn, bevy complains
         .queue_silenced(|mut entity: EntityWorldMut| {
             entity.remove::<EntityAnimationState<A>>();
         });
@@ -910,90 +860,4 @@ impl AnimationCommands for Commands<'_, '_> {
 }
 
 #[cfg(test)]
-#[allow(refining_impl_trait)]
-mod test {
-    use float_eq::assert_float_eq;
-    use std::ops::DerefMut;
-
-    use super::*;
-    use bevy::prelude::*;
-    use bevy_time::TimePlugin;
-
-    #[derive(Component)]
-    #[require(TestTarget)]
-    struct TestAnimation {
-        duration: f32,
-    }
-
-    #[derive(Component, Default, Debug)]
-    struct TestTarget {
-        local: usize,
-        t: f32,
-        dt: f32,
-    }
-
-    impl EntityAnimation for TestAnimation {
-        type Param = (
-            SSingle<Write<TestTarget>, With<TestAnimation>>,
-            SLocal<usize>,
-        );
-
-        fn configuration(&self) -> f32 {
-            self.duration
-        }
-
-        fn tick(
-            &mut self,
-            _entity: Entity,
-            t: f32,
-            dt: f32,
-            param: &mut StaticSystemParam<Self::Param>,
-        ) {
-            let (target, tracker) = param.deref_mut();
-            // this do-si-do is to verify i got the system param stuff in workable state
-            **tracker += 1;
-            target.local = **tracker;
-            target.t = t;
-            target.dt += dt;
-        }
-    }
-
-    #[test]
-    fn test_basics() {
-        let mut app = App::new();
-        app.add_plugins((
-            TimePlugin,
-            EntityAnimationPlugin::<TestAnimation>::default(),
-        ))
-        .add_systems(Startup, |mut commands: Commands| {
-            commands.spawn(TestAnimation { duration: 1.0 });
-        });
-        // back to back to back to back frames. the GPU is strong with this one
-        app.update();
-        app.update();
-        app.update();
-        app.update();
-        let mut query = app.world_mut().query::<&TestTarget>();
-        let target = query.single(app.world()).unwrap();
-        // pretty basic test, just make sure we got called and time moves like we expect
-        // (exact times depend on the timing of calling update so we aren't going to check that, but
-        // more than zero, and dt accumulation ~ t checks things work as expected)
-        assert_eq!(target.local, 4);
-        assert!(target.t > 0.0);
-        assert_float_eq!(target.t, target.dt, abs <= 0.001);
-    }
-
-    // need to verify more!
-    // - multiple entities, same component
-    // - multiple components, same entity
-    // - check every in-trait option is respected
-    // - controls/commands
-    // - different schedules, system ordering
-
-    // and while i'm making notes
-    // - more direct domain control?
-    // - more interesting playback control?
-    // look over other animation systems, see what makes sense here
-    // overloading `domain` to do so much is a little too old-school clever
-    // one option is a single method that returns a configuration struct with reasonable defaults
-}
+mod test;

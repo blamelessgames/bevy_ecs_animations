@@ -12,17 +12,27 @@ struct FadeIn;
 impl EntityAnimation for FadeIn {
     // Define the param your tick function receives,
     // using `bevy::ecs::system::lifetimeless` helpers
+
+    // this is effectively the same as the arguments to a system function,
+    // but with 'static lifetimes so the generics work (Bevy uses correct
+    // lifetimes at runtime). This gives your tick method full access to
+    // the ECS in a way that lets it schedule tick systems to run in parallel
+    // if possible
     type Param = SQuery<Write<TextColor>, With<Self>>;
 
     // animations require a configuration, minimally a duration
-    // since f32 implements Into<AnimationConfiguration> and takes it as the duration,
-    // you can just return that if you're happy with defaults
+    // since f32 implements Into<AnimationConfiguration> as the duration,
+    // you can just return that if you're happy with the other defaults
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
         4.0
     }
 
-    // Define the tick method, which will get invoked once
-    // per frame until the domain is covered
+    // This is the core. This function will get called every time the
+    // `Update` schedule runs, with the entity the component is attached to,
+    // the current spot in the timeline, and the system parameter. You can
+    // animate just about anything using this approach, from transforms and
+    // colors to which camera is active to entire lifecycles of entities that
+    // run other animations. It's basically a specialized system.
     fn tick(
         &mut self,
         entity: Entity,
@@ -66,7 +76,7 @@ fn startup(mut commands: Commands) {
             padding: UiRect::top(percent(20.0)),
             ..default()
         },
-        Text::from("TEXT"),
+        Text::from("Hello"),
         TextFont {
             font_size: FontSize::Vw(15.0),
             ..default()

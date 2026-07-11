@@ -1,6 +1,14 @@
 # bevy_ecs_animations
 An ECS-first approach to procedural animation in the Bevy engine, with an eye toward fine control without too much boilerplate.
 
+## What is it?
+To put it simply, this is a timeline manager that otherwise has little opinion about what you do with it. You define a `Component` type that implements the `EntityAnimation` trait, register it with the `EntityAnimationPlugin` during app configuration, and then insert it on some entity, probably one with
+some components you want to animate. Each tick of the `Update` schedule (or whatever schedule you configure) the trait impl's `tick` function will get invoked with the current time and a `SystemParameter` you define. Once the timeline is expended, the animation will get cleaned up (or not, if you configure it to leave things alone. Up to you!).
+
+There are some details around controlling things and some observers, but that's about the essence of things. It's a very simple abstraction that aims to formalize the plurality of ways one might tick an aniamtion around the idioms of the Bevy ECS.
+
+The examples cover some of the ways you can use this plugin to manage animating arbitrary things.
+
 ## Features
 - Component-driven animations with typed compile-time ECS access. Your animations are
   normal components, you can use arbitrary state and ticking is done mutably so you have
@@ -119,7 +127,7 @@ Generally, this plugin will track Bevy versions. Since Bevy is currently pre-1.0
 ### Fair Warning!
 Version numbers are set up to track Bevy compatibility, but much like Bevy this is under active development and there will be breaking changes as my needs evolve. Once the ecosystem crosses 1.0 there will be stronger guarantees.
 
-## Features
+## Cargo Features
 This plugin has an optional experimental module that offers const combinators that work with the `Curve` trait in bevy_math. It is currently activated by default, along with the `std` backend (glam). If you wish to use them with a different backend you'll have to disable default features first then re-enable. Combinators may move to separate library altogether, or vanish. Still not sure.
 
 |feature|description|
