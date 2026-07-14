@@ -1,17 +1,11 @@
 //! lots of animations doing things
-use std::{f32::consts::*, ops::DerefMut};
+use std::f32::consts::*;
 
-use bevy::{
-    color::palettes::css::*,
-    ecs::system::{
-        StaticSystemParam,
-        lifetimeless::{Read, SQuery, SResMut, Write},
-    },
-    prelude::*,
-};
+use bevy::{color::palettes::css::*, prelude::*};
+use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs_animations::{
-    AnimationCommands, AnimationConfiguration, EntityAnimation, EntityAnimationFinished,
-    EntityAnimationPlugin,
+    AnimationConfiguration, ECSAnimation, ECSAnimationCommands, ECSAnimationConfigs,
+    ECSAnimationFinished, ECSAnimationsApp, Tick,
     combinators::{BoxedCurve, map, scaled_output},
 };
 
@@ -20,12 +14,10 @@ const TOTAL_TIME: f32 = 900.0;
 
 fn main() -> AppExit {
     App::new()
-        .add_plugins((
-            DefaultPlugins,
-            EntityAnimationPlugin::<Wobble>::default(),
-            EntityAnimationPlugin::<Spin>::default(),
-            EntityAnimationPlugin::<Fade>::default(),
-        ))
+        .add_plugins(DefaultPlugins)
+        .register_ecs_animation::<Wobble>()
+        .register_ecs_animation::<Spin>()
+        .register_ecs_animation::<Fade>()
         .add_systems(Startup, startup)
         .add_systems(PreUpdate, input)
         .run()
@@ -117,7 +109,7 @@ fn startup(
         ))
         .observe(
             // you can observe entities for completion or the start of new repetitions
-            |finished: On<EntityAnimationFinished<Fade>>,
+            |finished: On<ECSAnimationFinished<Fade>>,
              fade: Single<&Fade>,
              mut commands: Commands| {
                 if **fade == Fade::Out {
@@ -133,11 +125,25 @@ enum Fade {
     In,
 }
 
-impl EntityAnimation for Fade {
-    type Param = (
-        SResMut<Assets<StandardMaterial>>,
-        SQuery<Read<MeshMaterial3d<StandardMaterial>>>,
-    );
+fn tick_fade(
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    faded: Single<(&MeshMaterial3d<StandardMaterial>, &Tick<Fade>)>,
+) {
+    let (mesh_material, tick) = faded.into_inner();
+
+    let Some(mut material) = materials.get_mut(mesh_material.0.id()) else {
+        return;
+    };
+    // because we're scaling a simple unit function we use `normalized_t`
+    material
+        .base_color
+        .set_alpha(EaseFunction::QuadraticIn.sample_clamped(tick.normalized_t));
+}
+
+impl ECSAnimation for Fade {
+    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
+        (Update, tick_fade.into_configs())
+    }
 
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
         match self {
@@ -148,55 +154,37 @@ impl EntityAnimation for Fade {
             Fade::In => AnimationConfiguration::from(1.2).start_at(0.5),
         }
     }
-
-    fn tick(&mut self, entity: Entity, t: f32, _: f32, param: &mut StaticSystemParam<Self::Param>) {
-        // you can animate just about whatever your heart desires,
-        let (materials, mesh_materials) = param.deref_mut();
-
-        let Ok(MeshMaterial3d(handle)) = mesh_materials.get(entity) else {
-            return;
-        };
-        let Some(mut material) = materials.get_mut(handle) else {
-            return;
-        };
-        // because we're scaling a simple unit function
-        // we have to normalize t
-        let t = self.normalized_t(t);
-        material
-            .base_color
-            .set_alpha(EaseFunction::QuadraticIn.sample_clamped(t));
-    }
 }
 
 #[derive(Component)]
 struct Spin;
 
-impl EntityAnimation for Spin {
-    type Param = SQuery<Write<Transform>, With<Self>>;
+fn tick_spin(spinners: Query<(&mut Transform, &Tick<Spin>)>) {
+    for (mut transform, tick) in spinners {
+        // you don't need to use a curve
+        // obviously there are about 50 million ways to achieve this same animation
+        let new = (Rot2::radians(tick.dt * 0.5) * transform.translation.xy()).normalize();
+        *transform = Transform::from_translation(new.extend(3.0)).looking_at(Vec3::ZERO, Vec3::Y);
+    }
+}
+
+impl ECSAnimation for Spin {
+    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
+        (Update, tick_spin.into_configs())
+    }
 
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
         AnimationConfiguration::from(12.0).repeat((TOTAL_TIME / 12.0) as u32)
-    }
-
-    fn tick(
-        &mut self,
-        entity: Entity,
-        _: f32,
-        dt: f32,
-        targets: &mut StaticSystemParam<Self::Param>,
-    ) {
-        let Ok(mut transform) = targets.get_mut(entity) else {
-            return;
-        };
-        // you don't need to use a curve
-        // obviously there are about 50 million ways to achieve this same animation
-        let new = (Rot2::radians(dt * 0.5) * transform.translation.xy()).normalize();
-        *transform = Transform::from_translation(new.extend(3.0)).looking_at(Vec3::ZERO, Vec3::Y);
     }
 }
 
 #[derive(Component, Deref)]
 struct Wobble(BoxedCurve<Dir3>);
+
+fn tick_wobble(wobble: Single<(&mut Transform, &Wobble, &Tick<Wobble>)>) {
+    let (mut transform, wobble, tick) = wobble.into_inner();
+    transform.rotate_axis(wobble.sample_unchecked(tick.normalized_t), tick.dt * 2.0);
+}
 
 impl Default for Wobble {
     fn default() -> Self {
@@ -206,24 +194,12 @@ impl Default for Wobble {
         )))
     }
 }
-impl EntityAnimation for Wobble {
-    type Param = SQuery<Write<Transform>, With<Self>>;
+impl ECSAnimation for Wobble {
+    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
+        (Update, tick_wobble.into_configs())
+    }
 
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
         TOTAL_TIME
-    }
-
-    fn tick(
-        &mut self,
-        entity: Entity,
-        t: f32,
-        dt: f32,
-        targets: &mut StaticSystemParam<Self::Param>,
-    ) {
-        let Ok(mut transform) = targets.get_mut(entity) else {
-            return;
-        };
-        // do whatever you want, get ticked on schedule til duration is up
-        transform.rotate_axis(self.sample_unchecked(self.normalized_t(t)), dt * 2.0);
     }
 }

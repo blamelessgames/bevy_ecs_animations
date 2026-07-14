@@ -1,24 +1,33 @@
 //! basic example
-use bevy::{
-    ecs::system::{StaticSystemParam, lifetimeless::*},
-    prelude::*,
-};
+use bevy::prelude::*;
 use bevy_ecs_animations::*;
 
-// 1. Define a component and implement EntityAnimation
+// 1. Define a component
 #[derive(Component)]
 struct FadeIn;
 
-impl EntityAnimation for FadeIn {
-    // Define the param your tick function receives,
-    // using `bevy::ecs::system::lifetimeless` helpers
+// 2. Define a system that will tick the animation. The `Tick` component is a per-animation-type
+//    component that is present on the entity while the animation is active. This means if you only
+//    have a single entity with a given component, using `Single` over the `Tick` will act as a run condition
+fn tick_fade_in(fade_in: Single<(&mut TextColor, &Tick<FadeIn>)>) {
+    let (mut text_color, tick) = fade_in.into_inner();
+    // Bevy ease functions expect unit input, so use `normalized_t`
+    let alpha = EaseFunction::CubicIn.sample_unchecked(tick.normalized_t);
+    text_color.set_alpha(alpha);
+}
 
-    // this is effectively the same as the arguments to a system function,
-    // but with 'static lifetimes so the generics work (Bevy uses correct
-    // lifetimes at runtime). This gives your tick method full access to
-    // the ECS in a way that lets it schedule tick systems to run in parallel
-    // if possible
-    type Param = SQuery<Write<TextColor>, With<Self>>;
+// 3. implement `ECSAnimation`
+impl ECSAnimation for FadeIn {
+    // 3a. provide the schedule and system that will be receive ticks.
+    fn system() -> (impl bevy_ecs::schedule::ScheduleLabel, ECSAnimationConfigs) {
+        (
+            // this can be any schedule you like, of course
+            Update,
+            // dealing with systems generically is a little tricky but if you invoke
+            // `into_configs()` everything works
+            tick_fade_in.into_configs(),
+        )
+    }
 
     // animations require a configuration, minimally a duration
     // since f32 implements Into<AnimationConfiguration> as the duration,
@@ -26,39 +35,19 @@ impl EntityAnimation for FadeIn {
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
         4.0
     }
-
-    // This is the core. This function will get called every time the
-    // `Update` schedule runs, with the entity the component is attached to,
-    // the current spot in the timeline, and the system parameter. You can
-    // animate just about anything using this approach, from transforms and
-    // colors to which camera is active to entire lifecycles of entities that
-    // run other animations. It's basically a specialized system.
-    fn tick(
-        &mut self,
-        entity: Entity,
-        t: f32,
-        _dt: f32,
-        param: &mut StaticSystemParam<Self::Param>,
-    ) {
-        let Ok(mut color) = param.get_mut(entity) else {
-            return;
-        };
-        // Ease functions expect unit input, so normalize t first
-        let t = self.normalized_t(t);
-        let alpha = EaseFunction::CubicIn.sample_unchecked(t);
-        color.set_alpha(alpha);
-    }
 }
 
-// 2. Add a plugin for the animation component
+// 4. Set up your app, registering your animation components so they get ticks
 fn main() -> AppExit {
     App::new()
-        .add_plugins((DefaultPlugins, EntityAnimationPlugin::<FadeIn>::default()))
+        .add_plugins(DefaultPlugins)
+        // this step is important!
+        .register_ecs_animation::<FadeIn>()
         .add_systems(Startup, startup)
         .run()
 }
 
-// 3. Spawn an animation on an entity in a system
+// 4. Spawn an animation on an entity
 fn startup(mut commands: Commands) {
     commands.spawn((
         Camera2d,

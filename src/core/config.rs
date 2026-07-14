@@ -1,0 +1,239 @@
+/// Encapsulates the configuration for an animation. Construct using the [From]
+/// implementation for f32, which supplies the duration, the minimal requirement.
+///
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0); // 4 seconds. must not be negative!
+/// ```
+///
+/// Most of this is directed toward configuring a timeline for the animation.
+/// The simplest case is just supplying a duration. Your animation will run from `0.0->duration`,
+/// your [tick](EntityAnimation::tick) method will get t values over that range, then the plugin will
+/// trigger a finished event, remove the animation (and associated state) from the entity, and that's that.
+///
+/// You can do a lot more.
+///
+/// The animation usually starts when the timeline starts, at 0.0 seconds. You can set a different
+/// start time if you need one. The animation will begin receiving ticks when the timeline
+/// reaches this start time, and it will continue ticking for `duration` seconds, so your
+/// tick method will receive t values running from `start->duration + start`
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).start_at(2.0);
+/// ```
+/// You can also delay the timeline. The delay counts down before the timeline starts. Nothing about your ticks
+/// changes, except the plugin doesn't start your timeline for `delay` seconds.
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).delay_by(2.0);
+/// ```
+/// So by default, the timeline starts immediately, sending ticks to your tick method,
+/// and it gets t values running from `0.0->duration`, and you can move this around.
+///
+/// So far the animation has always run forward, but you can also run in reverse.
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).play_in_reverse();
+/// ```
+/// This bears some explanation. Your tick method will now receive t values in reverse order,
+/// but everything else proceeds forward (time's arrow is uncompromising on this). What this means is first,
+/// any delay counts down, then the timeline ticks silently for `start` seconds, then your tick method will
+/// be invoked, receiving t values from `start + duration->start`.
+///
+/// By default, animations have 1 repetition, but you can ask for more.
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).repeat(2); // or more!
+/// ```
+/// This is pretty straightforward - after the delay expires, the timeline is run for as many repetitions as you configure
+///
+/// You can also set a count of 0, which means the animation will not play until you intervene somehow. However, if you simply
+/// want to start the animation paused, you can configure that.
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).start_paused(true);
+/// ```
+/// In this case, you'll have to use a [command](AnimationCommands) or [AnimationController] to unpause it before anything animates.
+///
+/// You can also configure how the plugin behaves when an animation finishes, which means that the animation has
+/// run through its entire timeline as many times as it has been configured to repeat. By default, the plugin will trigger
+/// [EntityAnimationRepeated] when an animation finishes a repetition, and [EntityAnimationFinished] when the overall animation
+/// is finished. You can disable this, if you don't care about the events (and maybe have so many animations running the overhead matters).
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).trigger_events(false);
+/// ```
+///
+/// The plugin will also do a little cleanup for you. By default, the animation component (and associated internal state) will be
+/// removed from the entity on finish. This causes an archetype move and also means you cannot reset the animation or read the state.
+/// If you prefer, you can have the plugin do nothing (which means it can be restarted via [commands](AnimationCommands) or an
+/// [AnimationController])
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).remove_nothing();
+/// ```
+///
+/// You can also have the plugin despawn the containing entity
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).despawn_entity();
+/// ```
+///
+/// If for some reason you want the default back, it's here
+/// ```
+/// # use bevy_ecs_animations::AnimationConfiguration;
+/// AnimationConfiguration::from(4.0).remove_animation();
+/// ```
+///
+/// That's it so far!
+#[derive(Debug, Copy, Clone)]
+pub struct AnimationConfiguration {
+    pub(super) duration: f32,
+    pub(super) start: f32,
+    pub(super) delay: f32,
+    pub(super) mode: PlaybackMode,
+    pub(super) repetitions: u32,
+    pub(super) paused: bool,
+    pub(super) events: bool,
+    pub(super) removal: RemovalOptions,
+}
+
+impl From<f32> for AnimationConfiguration {
+    fn from(duration: f32) -> Self {
+        Self::duration(duration)
+    }
+}
+
+impl AnimationConfiguration {
+    /// handles the logic of turning last frame's elapsed time + this frame's dt into t and dt values
+    /// for the animation's tick method, and also determines if it finished, or if there's no reason
+    /// to tick
+    pub(super) const fn t(&self, elapsed: f32, dt: f32) -> Option<(f32, f32, bool)> {
+        let start = self.start;
+        let end = start + self.duration;
+        let now = elapsed + dt;
+        let (produced_now, produced_end) = match self.mode {
+            PlaybackMode::Forward => (now, end),
+            PlaybackMode::Reverse => ((end - elapsed) + start - dt, start),
+        };
+
+        // if it's over, say so
+        if now >= end {
+            // adjust the dt
+            Some((produced_end, (end - elapsed), true))
+        // if its still before the start, say so
+        } else if now < start {
+            None
+        // otherwise everything is great!
+        } else {
+            Some((produced_now, dt, false))
+        }
+    }
+}
+
+impl AnimationConfiguration {
+    /// Create a new configuration with a duration
+    pub const fn duration(duration: f32) -> Self {
+        debug_assert!(duration >= 0.0, "negative durations cannot be set");
+        Self {
+            duration,
+            start: 0.0,
+            delay: 0.0,
+            mode: PlaybackMode::Forward,
+            repetitions: 1,
+            paused: false,
+            events: true,
+            removal: RemovalOptions::Component,
+        }
+    }
+
+    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds.
+    ///
+    /// Defaults to 0.0
+    ///
+    /// Must not be negative.
+    pub const fn start_at(mut self, start: f32) -> Self {
+        debug_assert!(start >= 0.0, "start cannot be negative");
+        self.start = start;
+        self
+    }
+
+    /// Seconds to "tick off" the timeline before it officially starts.
+    ///
+    pub const fn delay_by(mut self, delay: f32) -> Self {
+        debug_assert!(delay >= 0.0, "delay cannot be negative");
+        self.delay = delay;
+        self
+    }
+
+    /// Play the animation in forward order
+    ///
+    /// This is the default
+    pub const fn play_forward(mut self) -> Self {
+        self.mode = PlaybackMode::Forward;
+        self
+    }
+
+    /// Play the animation in reverse
+    pub const fn play_in_reverse(mut self) -> Self {
+        self.mode = PlaybackMode::Reverse;
+        self
+    }
+
+    /// set repetition count. 0 is valid but results in an animation that finishes
+    /// immediately
+    pub const fn repeat(mut self, repetitions: u32) -> Self {
+        self.repetitions = repetitions;
+        self
+    }
+
+    /// pass `true` to pause at start, doing nothing until you intervene
+    ///
+    /// default is `false`
+    pub const fn start_paused(mut self, paused: bool) -> Self {
+        self.paused = paused;
+        self
+    }
+
+    /// pass `false` to disable triggering documented events
+    ///
+    /// default is `true`
+    pub const fn trigger_events(mut self, events: bool) -> Self {
+        self.events = events;
+        self
+    }
+
+    /// When the animation is finished, remove the component + internal state from the entity
+    ///
+    /// this is the default.
+    pub const fn remove_animation(mut self) -> Self {
+        self.removal = RemovalOptions::Component;
+        self
+    }
+
+    /// When the animation is finished, despawn the entity
+    pub const fn despawn_entity(mut self) -> Self {
+        self.removal = RemovalOptions::Entity;
+        self
+    }
+
+    /// When the animation is finished, leave everything sitting there. Animations can be
+    /// restarted with (commands)[AnimationCommands] or an [AnimationController]
+    pub const fn remove_nothing(mut self) -> Self {
+        self.removal = RemovalOptions::Nothing;
+        self
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub(super) enum PlaybackMode {
+    Forward,
+    Reverse,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub(super) enum RemovalOptions {
+    Component,
+    Entity,
+    Nothing,
+}

@@ -2,8 +2,9 @@
 An ECS-first approach to procedural animation in the Bevy engine, with an eye toward fine control without too much boilerplate.
 
 ## What is it?
-To put it simply, this is a timeline manager that otherwise has little opinion about what you do with it. You define a `Component` type that implements the `EntityAnimation` trait, register it with the `EntityAnimationPlugin` during app configuration, and then insert it on some entity, probably one with
-some components you want to animate. Each tick of the `Update` schedule (or whatever schedule you configure) the trait impl's `tick` function will get invoked with the current time and a `SystemParameter` you define. Once the timeline is expended, the animation will get cleaned up (or not, if you configure it to leave things alone. Up to you!).
+To put it simply, this is a timeline manager that otherwise has little opinion about what you do with it. You define a `Component` type that implements the `ECSAnimation` trait, register it with the `ECSAnimationPlugin` during app configuration, and then insert it on some entity, probably one with some components you want to animate. Each tick of the schedule you configure the system you configure will be invoked, and
+every entity with a component configured as an animation will have a `Tick` component inserted with the current state of the timeline so long
+as an animation is active.
 
 There are some details around controlling things and some observers, but that's about the essence of things. It's a very simple abstraction that aims to formalize the plurality of ways one might tick an aniamtion around the idioms of the Bevy ECS.
 
@@ -11,8 +12,7 @@ The examples cover some of the ways you can use this plugin to manage animating 
 
 ## Features
 - Component-driven animations with typed compile-time ECS access. Your animations are
-  normal components, you can use arbitrary state and ticking is done mutably so you have
-  total freedom.
+  normal components, you write an ordinary system that runs in the context of the timeline
 - Bevy-friendly API - control animation parameters directly from animation components,
   react by observing the entity, interact using a system param, or issue commands.
 - No restrictions on what properties or types can be animated, if you want to use a curve that
@@ -32,85 +32,41 @@ cargo add bevy_ecs_animations
 (see [examples/basic.rs](examples/basic.rs))
 ```rust
 use bevy::{
-    ecs::system::{StaticSystemParam, lifetimeless::*},
     prelude::*,
+    ecs::schedule::ScheduleLabel,
 };
 use bevy_ecs_animations::*;
-use std::range::Range;
 
-// 1. Define a component and implement EntityAnimation
+#[derive(Component, Default)]
+struct Alpha(f32);
+
 #[derive(Component)]
-struct FadeIn;
+struct Fade;
 
-impl EntityAnimation for FadeIn {
-    // Define the param your tick function receives,
-    // using `bevy::ecs::system::lifetimeless` helpers
-    type Param = SQuery<Write<TextColor>, With<Self>>;
-
-    // animations require a configuration, minimally a duration
-    // since f32 implements Into<AnimationConfiguration> and takes it as the duration,
-    // you can just return that if you're happy with defaults
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        4.0
-    }
-
-    // Define the tick method, which will get invoked once
-    // per frame until the domain is covered
-    fn tick(
-        &mut self,
-        entity: Entity,
-        t: f32,
-        _dt: f32,
-        param: &mut StaticSystemParam<Self::Param>,
-    ) {
-        let Ok(mut color) = param.get_mut(entity) else {
-            return;
-        };
-        // Ease functions expect unit input, so normalize t first
-        let t = self.normalized_t(t);
-        let alpha = EaseFunction::CubicIn.sample_unchecked(t);
-        color.set_alpha(alpha);
+fn fade(mut fades: Query<(&Tick<Fade>, &mut Alpha)>) {
+    for (tick, mut alpha) in fades.iter_mut() {
+       alpha.0 = tick.normalized_t;
     }
 }
 
-// 2. Add a plugin for the animation component
+impl ECSAnimation for Fade {
+    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
+        (Update, fade.into_configs())
+    }
+
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
+        2.5
+    }
+}
+
 fn main() -> AppExit {
     App::new()
-        .add_plugins((
-          DefaultPlugins,
-          // Every type gets its own tick infrastructure, to maximize opportunities
-          // to parallelize system invocations
-          EntityAnimationPlugin::<FadeIn>::default()
-        ))
-        .add_systems(Startup, startup)
+        .add_plugins(MinimalPlugins)
+        .register_animation::<Fade>()
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn((Fade, Alpha::default()));
+        })
         .run()
-}
-
-// 3. Spawn an animation on an entity in a system
-fn startup(mut commands: Commands) {
-    commands.spawn((
-        Camera2d::default(),
-        Camera {
-            clear_color: Color::BLACK.into(),
-            ..default()
-        },
-    ));
-    commands.spawn((
-        // Inserting the component on an entity starts the animation
-        FadeIn,
-        Node {
-            width: percent(100.0),
-            height: percent(100.0),
-            padding: UiRect::top(percent(20.0)),
-            ..default()
-        },
-        Text::from("TEXT"),
-        TextFont {
-            font_size: FontSize::Vw(15.0),
-            ..default()
-        },
-        TextLayout::justify(Justify::Center),
-    ));
 }
 ```
 

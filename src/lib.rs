@@ -1,83 +1,45 @@
 //! ECS-driven Animations for Bevy
 //!
-//! ## How to use it
+//! ## How to use it (see examples/basic.rs)
 //!
-//! ```no_run
-//! use bevy::{prelude::*, ecs::system::{lifetimeless::*, StaticSystemParam}};
+//! ```
+//! use bevy::{
+//!     prelude::*,
+//!     ecs::schedule::ScheduleLabel,
+//! };
 //! use bevy_ecs_animations::*;
 //!
-//! // 1. Define a component and implement EntityAnimation
+//! #[derive(Component, Default)]
+//! struct Alpha(f32);
+//!
 //! #[derive(Component)]
-//! struct FadeIn;
+//! struct Fade;
 //!
-//! impl EntityAnimation for FadeIn {
-//!     // Define the param your tick function receives,
-//!     // using `bevy::ecs::system::lifetimeless` helpers
-//!     type Param = SQuery<Write<TextColor>, With<Self>>;
-//!
-//!     // animations require a configuration, minimally a duration
-//!     // since f32 implements Into<AnimationConfiguration> and takes it as the duration,
-//!     // you can just return that if you're happy with defaults
-//!     fn configuration(&self) -> impl Into<AnimationConfiguration> {
-//!         4.0
-//!     }
-//!     
-//!     // Define the tick method, which will get invoked once
-//!     // per frame until the domain is covered
-//!     fn tick(
-//!         &mut self,
-//!         entity: Entity,
-//!         t: f32,
-//!         _dt: f32,
-//!         param: &mut StaticSystemParam<Self::Param>
-//!     ) {
-//!         let Ok(mut color) = param.get_mut(entity) else {
-//!             return;
-//!         };
-//!         // Ease functions expect unit input, so normalize t first
-//!         let t = self.normalized_t(t);
-//!         let alpha = EaseFunction::CubicIn.sample_unchecked(t);
-//!         color.set_alpha(alpha);
+//! fn fade(mut fades: Query<(&Tick<Fade>, &mut Alpha)>) {
+//!     for (tick, mut alpha) in fades.iter_mut() {
+//!        alpha.0 = tick.normalized_t;
 //!     }
 //! }
 //!
-//! // 2. Add a plugin for the animation component
-//! fn main() -> AppExit {
+//! impl ECSAnimation for Fade {
+//!     fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
+//!         (Update, fade.into_configs())
+//!     }
+//!
+//!     fn configuration(&self) -> impl Into<AnimationConfiguration> {
+//!         2.5
+//!     }
+//! }
+//!
+//! fn run_app() -> AppExit {
 //!     App::new()
-//!         // Every type gets its own tick infrastructure, to maximize opportunities
-//!         // to parallelize system invocations
-//!         .add_plugins((DefaultPlugins, EntityAnimationPlugin::<FadeIn>::default()))
-//!         .add_systems(Startup, startup)
+//!         .add_plugins(MinimalPlugins)
+//!         .register_ecs_animation::<Fade>()
+//!         .add_systems(Startup, |mut commands: Commands| {
+//!             commands.spawn((Fade, Alpha::default()));
+//!         })
 //!         .run()
 //! }
-//!
-//! // 3. Spawn an animation on an entity in a system
-//! fn startup(mut commands: Commands) {
-//!     commands.spawn((
-//!         Camera2d::default(),
-//!         Camera {
-//!             clear_color: ClearColorConfig::Custom(Color::BLACK),
-//!             ..default()
-//!         },
-//!     ));
-//!     commands.spawn((
-//!         // Inserting the component on an entity starts the animation
-//!         FadeIn,
-//!         Node {
-//!             width: percent(100.0),
-//!             height: percent(100.0),
-//!             padding: UiRect::top(percent(20.0)),
-//!             ..default()
-//!         },
-//!         Text::from("TEXT"),
-//!         TextFont {
-//!             font_size: FontSize::Vw(15.0),
-//!             ..default()
-//!         },
-//!         TextLayout::justify(Justify::Center),
-//!     ));
-//! }
-//!
 //! ```
 //!
 //! ## Rambling

@@ -1,15 +1,19 @@
-//! Demonstrates applying the same animation to several entities, using various animation
-//! controller interfaces, and animating properties that bevy_animation makes somewhat annoying
+#![allow(deprecated)]
+//! Demonstrates applying the same animation to several entities, and also animates text
+//! currently validating deprecated code still works
 use std::f32::consts::*;
 
-use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
+use bevy::{ecs::system::lifetimeless::*, prelude::*};
+use bevy_ecs::system::StaticSystemParam;
 use bevy_ecs_animations::{combinators::*, *};
 
 fn main() -> AppExit {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .register_ecs_animation::<ReadyLetter>()
-        .register_ecs_animation::<PleaseSpawnReady>()
+        .add_plugins((
+            DefaultPlugins,
+            EntityAnimationPlugin::<ReadyLetter>::default(),
+            EntityAnimationPlugin::<PleaseSpawnReady>::default(),
+        ))
         .add_systems(Startup, startup)
         .add_systems(Update, wait_for_ready)
         .add_observer(please_spawn_ready)
@@ -25,32 +29,28 @@ const READY: &str = "READY";
 struct ReadyLetter(usize);
 
 impl ReadyLetter {
-    /// delay applied _before_ we start have a Tick available
     const fn delay(&self) -> f32 {
         // cheating here, a little bit of base delay to ensure the app gets started in non-optimized builds
-        // before we try to animate things so it isn't hitching and out of order
+        // before we try to animate things
         0.5 + self.0 as f32 * 0.15
     }
 
-    /// length in seconds of the main animation without delay
-    const fn main_phase_duration(&self) -> f32 {
+    const fn phase_duration(&self) -> f32 {
         0.65
     }
 
-    /// length in secdonds of fade animation phase
-    const fn fade_phase_duration(&self) -> f32 {
+    const fn fade_duration(&self) -> f32 {
         0.45
     }
 
-    /// total duration
     const fn duration(&self) -> f32 {
-        self.main_phase_duration() + self.fade_phase_duration()
+        self.phase_duration() + self.fade_duration()
     }
 
     const fn transform_curve(&self) -> impl Curve<(Val2, Vec2)> {
         scaled_domain(
             0.0,
-            self.main_phase_duration(),
+            self.phase_duration(),
             zip(
                 map(fn_curve(-PI, TAU - PI, |t| f32::cos(t) * 22.0), |y| {
                     Val2::px(0.0, y)
@@ -67,7 +67,7 @@ impl ReadyLetter {
         seq(
             scaled_domain(
                 0.0,
-                self.main_phase_duration(),
+                self.phase_duration(),
                 map(
                     zip(
                         scaled_output(0.0, 360.0, EaseFunction::SmootherStepIn),
@@ -78,8 +78,8 @@ impl ReadyLetter {
             ),
             map(
                 scaled_domain(
-                    self.main_phase_duration() + ((READY.len() - self.0) as f32 * 0.08),
-                    self.fade_phase_duration() + self.main_phase_duration(),
+                    self.phase_duration() + ((READY.len() - self.0) as f32 * 0.08),
+                    self.fade_duration() + self.phase_duration(),
                     EaseFunction::CubicOut,
                 ),
                 |alpha| Hsla::new(360.0, 0.5, 0.5, 1.0 - alpha),
@@ -88,36 +88,29 @@ impl ReadyLetter {
     }
 }
 
-fn tick_ready_letter(
-    mut ready_letters: Query<(
-        &ReadyLetter,
-        &mut UiTransform,
-        &mut TextColor,
-        &Tick<ReadyLetter>,
-    )>,
-) {
-    for (ready_letter, mut transform, mut text_color, tick) in ready_letters.iter_mut() {
-        let (translation, scale) = ready_letter.transform_curve().sample_clamped(tick.t);
-        transform.translation = translation;
-        transform.scale = scale;
-        text_color.0 = ready_letter
-            .text_color_curve()
-            .sample_clamped(tick.t)
-            .into();
-    }
-}
+impl EntityAnimation for ReadyLetter {
+    type Param = SQuery<(Write<UiTransform>, Write<TextColor>), With<Self>>;
 
-impl ECSAnimation for ReadyLetter {
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
         AnimationConfiguration::from(self.duration())
-            // each letter has a slightly longer delay than the letter before
             .delay_by(self.delay())
-            // we remove the whole tree of entities at once in `wait_for_ready`
             .remove_nothing()
     }
 
-    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
-        (Update, tick_ready_letter.into_configs())
+    fn tick(
+        &mut self,
+        entity: Entity,
+        t: f32,
+        _: f32,
+        targets: &mut StaticSystemParam<Self::Param>,
+    ) {
+        let Ok((mut transform, mut text_color)) = targets.get_mut(entity) else {
+            return;
+        };
+        let (translation, scale) = self.transform_curve().sample_clamped(t);
+        transform.translation = translation;
+        transform.scale = scale;
+        text_color.0 = self.text_color_curve().sample_clamped(t).into();
     }
 }
 
@@ -133,27 +126,7 @@ fn startup(mut commands: Commands) {
     commands.spawn(PleaseSpawnReady);
 }
 
-#[derive(Component)]
-struct PleaseSpawnReady;
-
-impl ECSAnimation for PleaseSpawnReady {
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        AnimationConfiguration::from(0.75).despawn_entity()
-    }
-
-    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
-        (
-            Update,
-            (|| {
-                // since we're using this as a fancy timer for an observer there's actually
-                // nothing to do here
-            })
-            .into_configs(),
-        )
-    }
-}
-
-fn please_spawn_ready(_: On<ECSAnimationFinished<PleaseSpawnReady>>, mut commands: Commands) {
+fn please_spawn_ready(_: On<EntityAnimationFinished<PleaseSpawnReady>>, mut commands: Commands) {
     let text_font = TextFont {
         font_size: FontSize::Vw(10.0),
         ..default()
@@ -210,4 +183,22 @@ fn wait_for_ready(
     // does not exist. i like bevy a lot
     commands.entity(*ready).despawn();
     commands.spawn(PleaseSpawnReady);
+}
+
+// a complicated timer? well yes, but also just a polite
+// way to spawn something that spawns something else after a little while.
+// could be useful!
+#[derive(Component)]
+struct PleaseSpawnReady;
+
+impl EntityAnimation for PleaseSpawnReady {
+    type Param = ();
+
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
+        AnimationConfiguration::from(0.75).despawn_entity()
+    }
+
+    fn tick(&mut self, _: Entity, _: f32, _: f32, _: &mut StaticSystemParam<Self::Param>) {
+        // since we're just using the timing infra to get an event there's nothing to put here
+    }
 }
