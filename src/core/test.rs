@@ -85,8 +85,8 @@ fn tick_test_animation(
     target.dt += tick.dt;
 }
 
-impl ECSAnimation for TestAnimation {
-    fn system() -> (impl bevy_ecs::schedule::ScheduleLabel, ECSAnimationConfigs) {
+impl Animation for TestAnimation {
+    fn system() -> (impl bevy_ecs::schedule::ScheduleLabel, TickSystemConfigs) {
         (Update, tick_test_animation.into_configs())
     }
 
@@ -99,7 +99,7 @@ impl ECSAnimation for TestAnimation {
 fn test_basics() {
     let mut app = App::new();
     app.add_plugins(TimePlugin)
-        .register_ecs_animation::<TestAnimation>()
+        .add_animation::<TestAnimation>()
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(TestAnimation { duration: 1.0 });
         });

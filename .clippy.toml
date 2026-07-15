@@ -1,0 +1,2 @@
+# the default is 250. i'm comfortable loosening it
+type-complexity-threshold=251 

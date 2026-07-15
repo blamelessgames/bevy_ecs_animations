@@ -8,15 +8,15 @@
 ///
 /// Most of this is directed toward configuring a timeline for the animation.
 /// The simplest case is just supplying a duration. Your animation will run from `0.0->duration`,
-/// your [tick](EntityAnimation::tick) method will get t values over that range, then the plugin will
+/// your tick system will get t values over that range, then the plugin will
 /// trigger a finished event, remove the animation (and associated state) from the entity, and that's that.
 ///
 /// You can do a lot more.
 ///
 /// The animation usually starts when the timeline starts, at 0.0 seconds. You can set a different
-/// start time if you need one. The animation will begin receiving ticks when the timeline
+/// start time if you need one. The system will begin receiving ticks when the timeline
 /// reaches this start time, and it will continue ticking for `duration` seconds, so your
-/// tick method will receive t values running from `start->duration + start`
+/// tick system will receive t values running from `start->duration + start`
 /// ```
 /// # use bevy_ecs_animations::AnimationConfiguration;
 /// AnimationConfiguration::from(4.0).start_at(2.0);
@@ -27,7 +27,7 @@
 /// # use bevy_ecs_animations::AnimationConfiguration;
 /// AnimationConfiguration::from(4.0).delay_by(2.0);
 /// ```
-/// So by default, the timeline starts immediately, sending ticks to your tick method,
+/// So by default, the timeline starts immediately, sending ticks to your tick system,
 /// and it gets t values running from `0.0->duration`, and you can move this around.
 ///
 /// So far the animation has always run forward, but you can also run in reverse.
@@ -53,12 +53,14 @@
 /// # use bevy_ecs_animations::AnimationConfiguration;
 /// AnimationConfiguration::from(4.0).start_paused(true);
 /// ```
-/// In this case, you'll have to use a [command](AnimationCommands) or [AnimationController] to unpause it before anything animates.
+/// In this case, you'll have to use a [command](super::AnimationCommands) or [`AnimationController`](super::AnimationController)
+/// to unpause it before anything animates.
 ///
 /// You can also configure how the plugin behaves when an animation finishes, which means that the animation has
 /// run through its entire timeline as many times as it has been configured to repeat. By default, the plugin will trigger
-/// [EntityAnimationRepeated] when an animation finishes a repetition, and [EntityAnimationFinished] when the overall animation
-/// is finished. You can disable this, if you don't care about the events (and maybe have so many animations running the overhead matters).
+/// [`AnimationRepeated`](super::AnimationRepeated) when an animation finishes a repetition, and [`AnimationFinished`](super::AnimationFinished)
+/// when the overall animation is finished. You can disable this, if you don't care about the events (or maybe have so many
+/// animations running the overhead matters).
 /// ```
 /// # use bevy_ecs_animations::AnimationConfiguration;
 /// AnimationConfiguration::from(4.0).trigger_events(false);
@@ -66,8 +68,8 @@
 ///
 /// The plugin will also do a little cleanup for you. By default, the animation component (and associated internal state) will be
 /// removed from the entity on finish. This causes an archetype move and also means you cannot reset the animation or read the state.
-/// If you prefer, you can have the plugin do nothing (which means it can be restarted via [commands](AnimationCommands) or an
-/// [AnimationController])
+/// If you prefer, you can have the plugin do nothing (which means it can be restarted via [commands](super::AnimationCommandsExt) or an
+/// [`AnimationController`](super::AnimationController))
 /// ```
 /// # use bevy_ecs_animations::AnimationConfiguration;
 /// AnimationConfiguration::from(4.0).remove_nothing();
@@ -218,7 +220,8 @@ impl AnimationConfiguration {
     }
 
     /// When the animation is finished, leave everything sitting there. Animations can be
-    /// restarted with (commands)[AnimationCommands] or an [AnimationController]
+    /// restarted with [commands](super::AnimationCommandsExt) or an
+    /// [`AnimationController`](super::AnimationController)
     pub const fn remove_nothing(mut self) -> Self {
         self.removal = RemovalOptions::Nothing;
         self

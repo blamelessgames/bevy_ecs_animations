@@ -8,10 +8,9 @@ use bevy_ecs_animations::{combinators::*, *};
 fn main() -> AppExit {
     App::new()
         .add_plugins(DefaultPlugins)
-        .register_ecs_animation::<ReadyLetter>()
-        .register_ecs_animation::<PleaseSpawnReady>()
+        .add_animation::<ReadyLetter>()
+        .add_animation::<PleaseSpawnReady>()
         .add_systems(Startup, startup)
-        .add_systems(Update, wait_for_ready)
         .add_observer(please_spawn_ready)
         .run()
 }
@@ -95,6 +94,9 @@ fn tick_ready_letter(
         &mut TextColor,
         &Tick<ReadyLetter>,
     )>,
+    ready_letters_controller: AnimationController<ReadyLetter>,
+    ready: Single<Entity, With<Ready>>,
+    mut commands: Commands,
 ) {
     for (ready_letter, mut transform, mut text_color, tick) in ready_letters.iter_mut() {
         let (translation, scale) = ready_letter.transform_curve().sample_clamped(tick.t);
@@ -105,9 +107,17 @@ fn tick_ready_letter(
             .sample_clamped(tick.t)
             .into();
     }
+
+    // this is probably the simplest way to know if a bunch of animations are done
+    // since this system has a `Single` query, despawning the entity from the query
+    // means this system gets disabled until another entity gets spawned, by PleaseSpawnReady
+    if ready_letters_controller.all_finished() {
+        commands.entity(*ready).despawn();
+        commands.spawn(PleaseSpawnReady);
+    }
 }
 
-impl ECSAnimation for ReadyLetter {
+impl Animation for ReadyLetter {
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
         AnimationConfiguration::from(self.duration())
             // each letter has a slightly longer delay than the letter before
@@ -116,7 +126,7 @@ impl ECSAnimation for ReadyLetter {
             .remove_nothing()
     }
 
-    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
+    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
         (Update, tick_ready_letter.into_configs())
     }
 }
@@ -136,24 +146,26 @@ fn startup(mut commands: Commands) {
 #[derive(Component)]
 struct PleaseSpawnReady;
 
-impl ECSAnimation for PleaseSpawnReady {
+impl Animation for PleaseSpawnReady {
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
         AnimationConfiguration::from(0.75).despawn_entity()
     }
 
-    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
+    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
         (
             Update,
             (|| {
                 // since we're using this as a fancy timer for an observer there's actually
-                // nothing to do here
+                // nothing to do here. in a release build i suspect this would get optimized
+                // down to nothing at all but don't take my word for it, i didn't godbolt it
+                // or anything
             })
             .into_configs(),
         )
     }
 }
 
-fn please_spawn_ready(_: On<ECSAnimationFinished<PleaseSpawnReady>>, mut commands: Commands) {
+fn please_spawn_ready(_: On<AnimationFinished<PleaseSpawnReady>>, mut commands: Commands) {
     let text_font = TextFont {
         font_size: FontSize::Vw(10.0),
         ..default()
@@ -194,20 +206,4 @@ fn please_spawn_ready(_: On<ECSAnimationFinished<PleaseSpawnReady>>, mut command
             },
         ))),
     ));
-}
-
-fn wait_for_ready(
-    ready_letters: AnimationController<ReadyLetter>,
-    ready: Single<Entity, With<Ready>>,
-    mut commands: Commands,
-) {
-    // there are other ways to figure out if a bunch of animations are done
-    // but this is probably the simplest if it's available to use
-    if !ready_letters.all_finished() {
-        return;
-    }
-    // by despawning the entity we take as a single query we disable ourselves when the entity we care about
-    // does not exist. i like bevy a lot
-    commands.entity(*ready).despawn();
-    commands.spawn(PleaseSpawnReady);
 }

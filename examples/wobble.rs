@@ -4,8 +4,8 @@ use std::f32::consts::*;
 use bevy::{color::palettes::css::*, prelude::*};
 use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs_animations::{
-    AnimationConfiguration, ECSAnimation, ECSAnimationCommands, ECSAnimationConfigs,
-    ECSAnimationFinished, ECSAnimationsApp, Tick,
+    Animation, AnimationAppExt, AnimationCommandsExt, AnimationConfiguration, AnimationFinished,
+    Tick, TickSystemConfigs,
     combinators::{BoxedCurve, map, scaled_output},
 };
 
@@ -15,9 +15,9 @@ const TOTAL_TIME: f32 = 900.0;
 fn main() -> AppExit {
     App::new()
         .add_plugins(DefaultPlugins)
-        .register_ecs_animation::<Wobble>()
-        .register_ecs_animation::<Spin>()
-        .register_ecs_animation::<Fade>()
+        .add_animation::<Wobble>()
+        .add_animation::<Spin>()
+        .add_animation::<Fade>()
         .add_systems(Startup, startup)
         .add_systems(PreUpdate, input)
         .run()
@@ -29,7 +29,11 @@ fn input(
     mut config_store: ResMut<GizmoConfigStore>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
-        commands.flip_pause_all::<Wobble>().flip_pause_all::<Spin>();
+        // if you're okay with deferred action you can control animations right from Commands
+        commands
+            .flip_pause_all::<Wobble>()
+            .flip_pause_all::<Spin>()
+            .flip_pause_all::<Fade>();
     }
     if keyboard.just_pressed(KeyCode::KeyG) {
         let (_, light_config) = config_store.config_mut::<LightGizmoConfigGroup>();
@@ -109,9 +113,7 @@ fn startup(
         ))
         .observe(
             // you can observe entities for completion or the start of new repetitions
-            |finished: On<ECSAnimationFinished<Fade>>,
-             fade: Single<&Fade>,
-             mut commands: Commands| {
+            |finished: On<AnimationFinished<Fade>>, fade: Single<&Fade>, mut commands: Commands| {
                 if **fade == Fade::Out {
                     commands.entity(finished.event_target()).insert(Fade::In);
                 }
@@ -125,6 +127,7 @@ enum Fade {
     In,
 }
 
+// this is not a scalable approach, animating materials gets expensive fast, but for one-offs it's okay
 fn tick_fade(
     mut materials: ResMut<Assets<StandardMaterial>>,
     faded: Single<(&MeshMaterial3d<StandardMaterial>, &Tick<Fade>)>,
@@ -140,9 +143,12 @@ fn tick_fade(
         .set_alpha(EaseFunction::QuadraticIn.sample_clamped(tick.normalized_t));
 }
 
-impl ECSAnimation for Fade {
-    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
-        (Update, tick_fade.into_configs())
+impl Animation for Fade {
+    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
+        // for no real reason i'm ordering the tick systems - it's just normal
+        // Bevy scheduling. internal systems are all per-type and ordered relative
+        // to your system so you have enough control to run whenever you want
+        (Update, tick_fade.after(tick_spin))
     }
 
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
@@ -168,9 +174,9 @@ fn tick_spin(spinners: Query<(&mut Transform, &Tick<Spin>)>) {
     }
 }
 
-impl ECSAnimation for Spin {
-    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
-        (Update, tick_spin.into_configs())
+impl Animation for Spin {
+    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
+        (Update, tick_spin.after(tick_wobble))
     }
 
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
@@ -194,8 +200,8 @@ impl Default for Wobble {
         )))
     }
 }
-impl ECSAnimation for Wobble {
-    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
+impl Animation for Wobble {
+    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
         (Update, tick_wobble.into_configs())
     }
 

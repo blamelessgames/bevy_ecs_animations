@@ -2,9 +2,7 @@
 An ECS-first approach to procedural animation in the Bevy engine, with an eye toward fine control without too much boilerplate.
 
 ## What is it?
-To put it simply, this is a timeline manager that otherwise has little opinion about what you do with it. You define a `Component` type that implements the `ECSAnimation` trait, register it with the `ECSAnimationPlugin` during app configuration, and then insert it on some entity, probably one with some components you want to animate. Each tick of the schedule you configure the system you configure will be invoked, and
-every entity with a component configured as an animation will have a `Tick` component inserted with the current state of the timeline so long
-as an animation is active.
+To put it simply, this is a timeline manager that otherwise has little opinion about what you do with it. You define a `Component` type that implements the `ECSAnimation` trait, register it during app configuration, and then insert it on some entity, probably one with some components you want to animate. Each tick of the schedule you configure the system you configure will be invoked, and every entity with a component configured as an animation will have a `Tick` component inserted with the current state of the timeline so long as an animation is active.
 
 There are some details around controlling things and some observers, but that's about the essence of things. It's a very simple abstraction that aims to formalize the plurality of ways one might tick an aniamtion around the idioms of the Bevy ECS.
 

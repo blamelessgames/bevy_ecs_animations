@@ -1,4 +1,16 @@
-//! ECS-driven Animations for Bevy
+//! # bevy_ecs_animations
+//! An ECS approach to procedural animation in the Bevy engine
+//!
+//! ## What is it?
+//! This crate gives you a lightweight, opinionated **timeline manager** with minimal ceremony.
+//! You define a normal [`Component`](bevy_ecs::component::Component) that implements the [`Animation`] trait,
+//! add it to the app, and insert instances on entities you want to animate.
+//!
+//! While the animation is active, a [`Tick`] component is automatically added to the entity.
+//! Your system reads this `Tick` to know where you are in the timeline (`t`, `normalized_t`, `dt`, etc.).
+//!
+//! Everything else — what you animate, how you react to progress, easing, state machines, etc. — is up to you.
+//!
 //!
 //! ## How to use it (see examples/basic.rs)
 //!
@@ -13,30 +25,36 @@
 //! struct Alpha(f32);
 //!
 //! #[derive(Component)]
-//! struct Fade;
+//! enum Fade {
+//!     In,
+//!     Out,
+//! }
 //!
-//! fn fade(mut fades: Query<(&Tick<Fade>, &mut Alpha)>) {
+//! fn tick_fade(mut fades: Query<(&Tick<Fade>, &mut Alpha)>) {
 //!     for (tick, mut alpha) in fades.iter_mut() {
 //!        alpha.0 = tick.normalized_t;
 //!     }
 //! }
 //!
-//! impl ECSAnimation for Fade {
-//!     fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
-//!         (Update, fade.into_configs())
+//! impl Animation for Fade {
+//!     fn system() -> (impl ScheduleLabel, AnimationConfigs) {
+//!         (Update, tick_fade.into_configs())
 //!     }
 //!
 //!     fn configuration(&self) -> impl Into<AnimationConfiguration> {
-//!         2.5
+//!         match *self {
+//!             Fade::In => AnimationConfiguration::duration(2.5),
+//!             Fade::Out => AnimationConfiguration::duration(2.5).play_in_reverse(),
+//!         }
 //!     }
 //! }
 //!
 //! fn run_app() -> AppExit {
 //!     App::new()
 //!         .add_plugins(MinimalPlugins)
-//!         .register_ecs_animation::<Fade>()
+//!         .add_animation::<Fade>()
 //!         .add_systems(Startup, |mut commands: Commands| {
-//!             commands.spawn((Fade, Alpha::default()));
+//!             commands.spawn((Fade::In, Alpha::default()));
 //!         })
 //!         .run()
 //! }
@@ -50,7 +68,7 @@
 //! internal animation graph that abstracts blend operations to nodes outside the property accesses,
 //! there are a few limitations. Primarily, only types the system knows how to blend are supported.
 //! It is not trivial to animate the hue of HSLA colors, or the translation of UI nodes, as examples.
-//! The specific components need to be accessed via [EntityMut](bevy_ecs::world::EntityMut), and only
+//! The specific components need to be accessed via [`EntityMut`](bevy_ecs::world::EntityMut), and only
 //! a single field of an understood type can be exposed per curve, even if you want to animate several
 //! properties together.
 //!
@@ -68,14 +86,11 @@
 //! simply does not show up in the relevant query, and users are left wondering why until they notice,
 //!
 //! This plugin takes a more concrete approach. Users define a component that holds relevant animation
-//! state (whatever that happens to be, I'm not the boss of users), implement the [EntityAnimation] trait
-//! on it, then register the component with the [EntityAnimationPlugin] during app initialization and
-//! insert an instance on entities that should be animated, optionally managing the animation via
-//! commands or an [AnimationController]. The [EntityAnimation] trait centers on the
-//! [tick](EntityAnimation::tick) method, which is invoked periodically while the
-//! animation in question is live. The trait defines the coarse-grained management
-//! behavior via associated types and function definitions, with an aim of allowing full control when
-//! the (hopefully reasonable) defaults are insufficient.
+//! state (whatever that happens to be, I'm not the boss of users), implement the [`Animation`] trait
+//! on it, then register the component during app initialization and insert an instance on entities that
+//! should be animated, optionally managing the animation via [`AnimationCommands`] or an [`AnimationController`]. The
+//! [`Animation`] trait enables the plugin to tick the given system according to configuration, and
+//! in general, you're just writing a normal Bevy ECS code with no restrictions.
 
 // more probably makes sense here but this should hold true until it doesn't
 #![deny(unsafe_code)]
