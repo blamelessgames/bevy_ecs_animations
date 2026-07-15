@@ -1,12 +1,83 @@
 # bevy_ecs_animations
-An ECS-first approach to procedural animation in the Bevy engine, with an eye toward fine control without too much boilerplate.
+[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/blamelessgames/bevy_ecs_animations#license)
+[![Crates.io](https://img.shields.io/crates/v/bevy_ecs_animations.svg)](https://crates.io/crates/bevy_ecs_animations)
+[![Downloads](https://img.shields.io/crates/d/bevy_ecs_animations.svg)](https://crates.io/crates/bevy_ecs_animations)
+[![Docs](https://docs.rs/bevy_ecs_animations/badge.svg)](https://docs.rs/bevy/latest/bevy_ecs_animations/)
+
+An ECS approach to procedural animation in the Bevy engine
+
+## Important: API Transition (v0.19.2)
+
+**The old `EntityAnimation` trait and `EntityAnimationPlugin` have been deprecated** in favor of the much simpler `Animation` trait + `add_animation` API.
+
+The old API still works but will emit deprecation warnings. It will be removed in a future release.
+
+### Quick Migration
+- `EntityAnimation` → `Animation`
+- `EntityAnimationPlugin::<T>` → `.add_animation::<T>()`
+- See the new [basic example](examples/basic.rs), the updated documentation, and the [Quick Start](#quick-start) below.
 
 ## What is it?
-To put it simply, this is a timeline manager that otherwise has little opinion about what you do with it. You define a `Component` type that implements the `ECSAnimation` trait, register it during app configuration, and then insert it on some entity, probably one with some components you want to animate. Each tick of the schedule you configure the system you configure will be invoked, and every entity with a component configured as an animation will have a `Tick` component inserted with the current state of the timeline so long as an animation is active.
+This crate gives you a lightweight, opinionated timeline manager with minimal ceremony. You define a normal `Component` that implements the `Animation` trait, add it to the app, and insert instances on entities you want to animate.
 
-There are some details around controlling things and some observers, but that's about the essence of things. It's a very simple abstraction that aims to formalize the plurality of ways one might tick an aniamtion around the idioms of the Bevy ECS.
+While the animation is active, a Tick component is automatically added to the entity. Your system reads this Tick to know where you are in the timeline (t, normalized_t, dt, etc.).
 
-The examples cover some of the ways you can use this plugin to manage animating arbitrary things.
+Everything else — what you animate, how you react to progress, easing, state machines, etc. — is up to you.
+
+## How to use it
+(see examples!)
+
+### Installation
+```sh
+cargo add bevy_ecs_animations
+```
+
+### Quick Start
+```rust
+use bevy::{
+    prelude::*,
+    ecs::schedule::ScheduleLabel,
+};
+use bevy_ecs_animations::*;
+
+#[derive(Component, Default)]
+struct Alpha(f32);
+
+#[derive(Component)]
+enum Fade {
+    In,
+    Out,
+}
+
+fn tick_fade(mut fades: Query<(&Tick<Fade>, &mut Alpha)>) {
+    for (tick, mut alpha) in fades.iter_mut() {
+       alpha.0 = tick.normalized_t;
+    }
+}
+
+impl Animation for Fade {
+    fn system() -> (impl ScheduleLabel, AnimationConfigs) {
+        (Update, tick_fade.into_configs())
+    }
+
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
+        match *self {
+            Fade::In => AnimationConfiguration::duration(2.5),
+            Fade::Out => AnimationConfiguration::duration(2.5).play_in_reverse(),
+        }
+    }
+}
+
+fn run_app() -> AppExit {
+    App::new()
+        .add_plugins(MinimalPlugins)
+        .add_animation::<Fade>()
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn((Fade::In, Alpha::default()));
+        })
+        .run()
+}
+```
 
 ## Features
 - Component-driven animations with typed compile-time ECS access. Your animations are
@@ -20,53 +91,6 @@ The examples cover some of the ways you can use this plugin to manage animating 
 - Experimental [Curve](https://docs.rs/bevy_math/latest/bevy_math/curve/trait.Curve.html) combinators 
   with const constructors, for the efficiency fiend in you - guarantee allocation-free construction,
   or even make a complicated compile-time curve if you want to write down insane type names.
-
-## Installation
-```sh
-cargo add bevy_ecs_animations
-```
-
-## Quick Start
-(see [examples/basic.rs](examples/basic.rs))
-```rust
-use bevy::{
-    prelude::*,
-    ecs::schedule::ScheduleLabel,
-};
-use bevy_ecs_animations::*;
-
-#[derive(Component, Default)]
-struct Alpha(f32);
-
-#[derive(Component)]
-struct Fade;
-
-fn fade(mut fades: Query<(&Tick<Fade>, &mut Alpha)>) {
-    for (tick, mut alpha) in fades.iter_mut() {
-       alpha.0 = tick.normalized_t;
-    }
-}
-
-impl ECSAnimation for Fade {
-    fn system() -> (impl ScheduleLabel, ECSAnimationConfigs) {
-        (Update, fade.into_configs())
-    }
-
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        2.5
-    }
-}
-
-fn main() -> AppExit {
-    App::new()
-        .add_plugins(MinimalPlugins)
-        .register_animation::<Fade>()
-        .add_systems(Startup, |mut commands: Commands| {
-            commands.spawn((Fade, Alpha::default()));
-        })
-        .run()
-}
-```
 
 ## Requirements
 - Bevy 0.19
