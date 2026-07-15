@@ -56,7 +56,7 @@ fn tick_fade(mut fades: Query<(&Tick<Fade>, &mut Alpha)>) {
 }
 
 impl Animation for Fade {
-    fn system() -> (impl ScheduleLabel, AnimationConfigs) {
+    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
         (Update, tick_fade.into_configs())
     }
 
