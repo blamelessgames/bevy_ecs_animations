@@ -1,6 +1,6 @@
 [package]
 name = "bevy_ecs_animations"
-version = "0.19.2-dev"
+version = "0.19.2"
 edition = "2024"
 authors = ["BlamelessGames"]
 description = "An ECS-first approach to procedural animation in Bevy."
