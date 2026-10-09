@@ -4,16 +4,17 @@
 //! ## What is it?
 //! This crate gives you a lightweight, opinionated **timeline manager** with minimal ceremony.
 //! You define a normal [`Component`](bevy_ecs::component::Component) that implements the [`Animation`] trait,
-//! add it to the app, and insert instances on entities you want to animate.
+//! add it to the app with [`add_animation`](AnimationAppExt::add_animation), and insert instances
+//! on entities you want to animate.
 //!
 //! While the animation is active, a [`Tick`] component is automatically added to the entity.
-//! Your system reads this `Tick` to know where you are in the timeline (`t`, `normalized_t`, `dt`, etc.).
+//! Your system reads this `Tick` to know where you are in the timeline (via [`t`](Tick::t),
+//! [`normalized_t`](Tick::normalized_t), [`dt`](Tick::dt), and [`repetition`](Tick::repetition)).
 //!
 //! Everything else — what you animate, how you react to progress, easing, state machines, etc. — is up to you.
 //!
-//!
-//! ## How to use it (see examples/basic.rs)
-//!
+//! ## How to use it
+//! (see examples/basic.rs)
 //! ```
 //! use bevy::{
 //!     prelude::*,
@@ -37,7 +38,7 @@
 //! }
 //!
 //! impl Animation for Fade {
-//!     fn system() -> (impl ScheduleLabel, AnimationConfigs) {
+//!     fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
 //!         (Update, tick_fade.into_configs())
 //!     }
 //!
@@ -100,3 +101,5 @@ pub mod combinators;
 mod core;
 
 pub use core::*;
+
+pub use bevy_ecs_animations_macros::animation;

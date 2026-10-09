@@ -1,16 +1,11 @@
-//! lots of animations doing things
+//! a bunch of animations doing things without much ceremony
 use std::f32::consts::*;
 
-use bevy::{color::palettes::css::*, prelude::*};
-use bevy_ecs::schedule::ScheduleLabel;
+use bevy::{color::palettes::css::*, ecs::schedule::ScheduleLabel, prelude::*};
 use bevy_ecs_animations::{
     Animation, AnimationAppExt, AnimationCommandsExt, AnimationConfiguration, AnimationFinished,
-    Tick, TickSystemConfigs,
-    combinators::{BoxedCurve, map, scaled_output},
+    PersistentTick, Tick, TickSystemConfigs, animation, duration,
 };
-
-// 15 minutes oughta be enough for anybody
-const TOTAL_TIME: f32 = 900.0;
 
 fn main() -> AppExit {
     App::new()
@@ -19,8 +14,91 @@ fn main() -> AppExit {
         .add_animation::<Spin>()
         .add_animation::<Fade>()
         .add_systems(Startup, startup)
-        .add_systems(PreUpdate, input)
+        .add_systems(Update, input)
         .run()
+}
+
+#[derive(Component)]
+#[require(PersistentTick<Spin>)]
+struct Spin;
+
+#[animation]
+fn tick_spin(spinners: Query<(&mut Transform, &PersistentTick<Spin>)>) {
+    for (mut transform, tick) in spinners {
+        let Some(tick) = **tick else {
+            continue;
+        };
+        let new = (Rot2::radians(tick.dt * 0.5) * transform.translation.xy()).normalize();
+        *transform = Transform::from_translation(new.extend(3.0)).looking_at(Vec3::ZERO, Vec3::Y);
+    }
+}
+
+#[derive(Component)]
+#[require(PersistentTick<Wobble>)]
+struct Wobble;
+
+#[animation]
+fn tick_wobble(wobbler: Single<(&mut Transform, &PersistentTick<Wobble>)>) {
+    let (mut transform, tick) = wobbler.into_inner();
+    let Some(tick) = **tick else {
+        return;
+    };
+    // the default animation configuration is `forever` which is really 3600.0 seconds,
+    // (repeated for a really long time), so treating t as degrees works out
+    let radians = tick.t.to_radians();
+    let axis = Dir3::new_unchecked(
+        Dir3::X
+            .rotate_z(
+                // stack some cycles and wobble the night away
+                (radians.sin()
+                    + (radians * 10.832).sin() * 0.6
+                    + (radians * 100.723).sin() * 0.3
+                    + (radians * 999.284).sin() * 0.15)
+                    * TAU,
+            )
+            .normalize(),
+    );
+    transform.rotate_axis(axis, tick.dt * 2.0);
+}
+
+#[derive(Component, PartialEq, Eq)]
+enum Fade {
+    Out,
+    In,
+}
+
+// this is not a scalable approach, animating materials gets expensive fast, but for one-offs it's okay
+fn tick_fade(
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    faded: Single<(&MeshMaterial3d<StandardMaterial>, &Tick<Fade>)>,
+) {
+    let (mesh_material, tick) = faded.into_inner();
+
+    let Some(mut material) = materials.get_mut(mesh_material.0.id()) else {
+        return;
+    };
+    // because we're scaling a simple ease function we use `normalized_t`
+    material
+        .base_color
+        .set_alpha(EaseFunction::QuadraticIn.sample_clamped(tick.normalized_t));
+}
+
+impl Animation for Fade {
+    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
+        (Update, tick_fade.into_configs())
+    }
+
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
+        // leave it in place during the interim between the phases, and let it remove
+        // the animation components at the end of the second phase
+        match self {
+            Fade::Out => duration(1.4)
+                .start_at(2.1)
+                .play_in_reverse()
+                .remove_nothing(),
+            Fade::In => duration(1.2).start_at(0.5),
+        }
+    }
 }
 
 fn input(
@@ -109,7 +187,7 @@ fn startup(
             // same properties with two animations at once unless you
             // like glitches and head-scratching bugs
             Fade::Out,
-            Wobble::default(),
+            Wobble,
         ))
         .observe(
             // you can observe entities for completion or the start of new repetitions
@@ -119,93 +197,4 @@ fn startup(
                 }
             },
         );
-}
-
-#[derive(Component, PartialEq, Eq)]
-enum Fade {
-    Out,
-    In,
-}
-
-// this is not a scalable approach, animating materials gets expensive fast, but for one-offs it's okay
-fn tick_fade(
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    faded: Single<(&MeshMaterial3d<StandardMaterial>, &Tick<Fade>)>,
-) {
-    let (mesh_material, tick) = faded.into_inner();
-
-    let Some(mut material) = materials.get_mut(mesh_material.0.id()) else {
-        return;
-    };
-    // because we're scaling a simple unit function we use `normalized_t`
-    material
-        .base_color
-        .set_alpha(EaseFunction::QuadraticIn.sample_clamped(tick.normalized_t));
-}
-
-impl Animation for Fade {
-    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
-        // for no real reason i'm ordering the tick systems - it's just normal
-        // Bevy scheduling. internal systems are all per-type and ordered relative
-        // to your system so you have enough control to run whenever you want
-        (Update, tick_fade.after(tick_spin))
-    }
-
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        match self {
-            Fade::Out => AnimationConfiguration::from(1.4)
-                .start_at(2.1)
-                .play_in_reverse()
-                .remove_nothing(),
-            Fade::In => AnimationConfiguration::from(1.2).start_at(0.5),
-        }
-    }
-}
-
-#[derive(Component)]
-struct Spin;
-
-fn tick_spin(spinners: Query<(&mut Transform, &Tick<Spin>)>) {
-    for (mut transform, tick) in spinners {
-        // you don't need to use a curve
-        // obviously there are about 50 million ways to achieve this same animation
-        let new = (Rot2::radians(tick.dt * 0.5) * transform.translation.xy()).normalize();
-        *transform = Transform::from_translation(new.extend(3.0)).looking_at(Vec3::ZERO, Vec3::Y);
-    }
-}
-
-impl Animation for Spin {
-    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
-        (Update, tick_spin.after(tick_wobble))
-    }
-
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        AnimationConfiguration::from(12.0).repeat((TOTAL_TIME / 12.0) as u32)
-    }
-}
-
-#[derive(Component, Deref)]
-struct Wobble(BoxedCurve<Dir3>);
-
-fn tick_wobble(wobble: Single<(&mut Transform, &Wobble, &Tick<Wobble>)>) {
-    let (mut transform, wobble, tick) = wobble.into_inner();
-    transform.rotate_axis(wobble.sample_unchecked(tick.normalized_t), tick.dt * 2.0);
-}
-
-impl Default for Wobble {
-    fn default() -> Self {
-        Wobble(Box::new(map(
-            scaled_output(TAU * -10.0, TAU * 10.0, EaseFunction::CircularInOut),
-            |angle| Dir3::new_unchecked(Dir3::X.rotate_z(angle).normalize()),
-        )))
-    }
-}
-impl Animation for Wobble {
-    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
-        (Update, tick_wobble.into_configs())
-    }
-
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        TOTAL_TIME
-    }
 }

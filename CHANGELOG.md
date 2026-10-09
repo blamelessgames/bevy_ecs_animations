@@ -1,9 +1,16 @@
 # Changes
 
+
+### 0.20.1
+- attribute macro for the simplest case (more to come)
+- PersistentTick, to avoid archetype changes
+- some small internal improvements
+- doc fixes
+
 ### 0.20.0
 - updated to bevy 0.20
 - removed deprecated code
-- new "cascase" example, thanks @bokubeam!
+- new "cascade" example, thanks @bokubeam!
 
 ### 0.19.2
 - deprecated the existing API and made it much simpler and amenable to a derive macro

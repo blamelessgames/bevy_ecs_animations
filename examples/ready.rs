@@ -26,30 +26,17 @@ struct ReadyLetter(usize);
 impl ReadyLetter {
     /// delay applied _before_ we start have a Tick available
     const fn delay(&self) -> f32 {
-        // cheating here, a little bit of base delay to ensure the app gets started in non-optimized builds
-        // before we try to animate things so it isn't hitching and out of order
-        0.5 + self.0 as f32 * 0.15
+        self.0 as f32 * 0.15
     }
 
-    /// length in seconds of the main animation without delay
-    const fn main_phase_duration(&self) -> f32 {
-        0.65
-    }
-
-    /// length in secdonds of fade animation phase
-    const fn fade_phase_duration(&self) -> f32 {
-        0.45
-    }
-
-    /// total duration
-    const fn duration(&self) -> f32 {
-        self.main_phase_duration() + self.fade_phase_duration()
-    }
+    const MAIN_PHASE: f32 = 0.65;
+    const FADE_PHASE: f32 = 0.45;
+    const DURATION: f32 = Self::MAIN_PHASE + Self::FADE_PHASE;
 
     const fn transform_curve(&self) -> impl Curve<(Val2, Vec2)> {
         scaled_domain(
             0.0,
-            self.main_phase_duration(),
+            Self::MAIN_PHASE,
             zip(
                 map(fn_curve(-PI, TAU - PI, |t| f32::cos(t) * 22.0), |y| {
                     Val2::px(0.0, y)
@@ -66,7 +53,7 @@ impl ReadyLetter {
         seq(
             scaled_domain(
                 0.0,
-                self.main_phase_duration(),
+                Self::MAIN_PHASE,
                 map(
                     zip(
                         scaled_output(0.0, 360.0, EaseFunction::SmootherStepIn),
@@ -77,8 +64,8 @@ impl ReadyLetter {
             ),
             map(
                 scaled_domain(
-                    self.main_phase_duration() + ((READY.len() - self.0) as f32 * 0.08),
-                    self.fade_phase_duration() + self.main_phase_duration(),
+                    Self::MAIN_PHASE + ((READY.len() - self.0) as f32 * 0.08),
+                    Self::DURATION,
                     EaseFunction::CubicOut,
                 ),
                 |alpha| Hsla::new(360.0, 0.5, 0.5, 1.0 - alpha),
@@ -98,6 +85,7 @@ fn tick_ready_letter(
     ready: Single<Entity, With<Ready>>,
     mut commands: Commands,
 ) {
+    let mut count = 0;
     for (ready_letter, mut transform, mut text_color, tick) in ready_letters.iter_mut() {
         let (translation, scale) = ready_letter.transform_curve().sample_clamped(tick.t);
         transform.translation = translation;
@@ -106,12 +94,18 @@ fn tick_ready_letter(
             .text_color_curve()
             .sample_clamped(tick.t)
             .into();
+        count += 1;
+    }
+
+    if count != 5 {
+        // println!("{:#?}", ready_letters_controller.states());
     }
 
     // this is probably the simplest way to know if a bunch of animations are done
     // since this system has a `Single` query, despawning the entity from the query
     // means this system gets disabled until another entity gets spawned, by PleaseSpawnReady
     if ready_letters_controller.all_finished() {
+        println!("all finished!");
         commands.entity(*ready).despawn();
         commands.spawn(PleaseSpawnReady);
     }
@@ -119,10 +113,9 @@ fn tick_ready_letter(
 
 impl Animation for ReadyLetter {
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        AnimationConfiguration::from(self.duration())
+        AnimationConfiguration::from(Self::DURATION)
             // each letter has a slightly longer delay than the letter before
             .delay_by(self.delay())
-            // we remove the whole tree of entities at once in `wait_for_ready`
             .remove_nothing()
     }
 
@@ -148,7 +141,7 @@ struct PleaseSpawnReady;
 
 impl Animation for PleaseSpawnReady {
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        AnimationConfiguration::from(0.75).despawn_entity()
+        AnimationConfiguration::from(0.5).despawn_entity()
     }
 
     fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
@@ -207,3 +200,93 @@ fn please_spawn_ready(_: On<AnimationFinished<PleaseSpawnReady>>, mut commands: 
         ))),
     ));
 }
+
+/*
+[
+    AnimationState {
+        elapsed: 1.0999999,
+        last_dt: 0.0075013638,
+        repetitions_remaining: 0,
+        finished: true,
+        paused: false,
+        configuration: AnimationConfiguration {
+            duration: 1.0999999,
+            start: 0.0,
+            delay: 0.0,
+            mode: Forward,
+            repetitions: 1,
+            paused: false,
+            events: true,
+            removal: Nothing,
+        },
+    },
+    AnimationState {
+        elapsed: 1.0999999,
+        last_dt: 0.0,
+        repetitions_remaining: 1,
+        finished: false,
+        paused: false,
+        configuration: AnimationConfiguration {
+            duration: 1.0999999,
+            start: 0.0,
+            delay: 0.6,
+            mode: Forward,
+            repetitions: 1,
+            paused: false,
+            events: true,
+            removal: Nothing,
+        },
+    },
+    AnimationState {
+        elapsed: 1.0999999,
+        last_dt: 0.0,
+        repetitions_remaining: 1,
+        finished: false,
+        paused: false,
+        configuration: AnimationConfiguration {
+            duration: 1.0999999,
+            start: 0.0,
+            delay: 0.15,
+            mode: Forward,
+            repetitions: 1,
+            paused: false,
+            events: true,
+            removal: Nothing,
+        },
+    },
+    AnimationState {
+        elapsed: 1.0999999,
+        last_dt: 0.0,
+        repetitions_remaining: 1,
+        finished: false,
+        paused: false,
+        configuration: AnimationConfiguration {
+            duration: 1.0999999,
+            start: 0.0,
+            delay: 0.3,
+            mode: Forward,
+            repetitions: 1,
+            paused: false,
+            events: true,
+            removal: Nothing,
+        },
+    },
+    AnimationState {
+        elapsed: 1.0999999,
+        last_dt: 0.0,
+        repetitions_remaining: 1,
+        finished: false,
+        paused: false,
+        configuration: AnimationConfiguration {
+            duration: 1.0999999,
+            start: 0.0,
+            delay: 0.45000002,
+            mode: Forward,
+            repetitions: 1,
+            paused: false,
+            events: true,
+            removal: Nothing,
+        },
+    },
+]
+*/

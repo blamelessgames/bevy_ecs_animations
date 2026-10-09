@@ -1,20 +1,23 @@
-use crate::*;
+use std::{marker::PhantomData, time::Duration};
+
+use crate::{core::AnimationTickState, *};
 use bevy::{prelude::*, time::TimePlugin};
+use bevy_time::TimeUpdateStrategy;
 use float_eq::assert_float_eq;
 
 #[test]
 fn test_timekeeping() {
     use float_eq::assert_float_eq;
     fn test(c: AnimationConfiguration, elapsed: f32, dt: f32, expected: Option<(f32, f32, bool)>) {
-        let Some((elapsed, dt, done)) = c.t(elapsed, dt) else {
+        let Some(AnimationTickState { t, dt, finished }) = c.t(elapsed, dt) else {
             assert_eq!(expected, None);
             return;
         };
-        let (e_elapsed, e_dt, e_done) = expected.expect("expected None!");
+        let (e_t, e_dt, e_finished) = expected.expect("expected None!");
         // millisecond precision seems fine?
-        assert_float_eq!(e_elapsed, elapsed, abs <= 0.001);
+        assert_float_eq!(e_t, t, abs <= 0.001);
         assert_float_eq!(e_dt, dt, abs <= 0.001);
-        assert_eq!(e_done, done);
+        assert_eq!(e_finished, finished);
     }
 
     let c = AnimationConfiguration::from(4.0);
@@ -61,21 +64,43 @@ fn test_timekeeping() {
 }
 
 #[derive(Component)]
-#[require(TestTarget)]
-struct TestAnimation {
-    duration: f32,
-}
+#[require(TestTarget<TestAnimation>)]
+struct TestAnimation;
 
-#[derive(Component, Default, Debug)]
-struct TestTarget {
+#[derive(Component)]
+#[require(TestTarget<TestAnimation2>, PersistentTick<TestAnimation2>)]
+struct TestAnimation2;
+
+#[derive(Component, Debug)]
+struct TestTarget<T> {
     local: usize,
     t: f32,
     dt: f32,
+    _marker: PhantomData<fn() -> T>,
 }
+
+impl<T> Default for TestTarget<T> {
+    fn default() -> Self {
+        Self {
+            local: 0,
+            t: 0.0,
+            dt: 0.0,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> Clone for TestTarget<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for TestTarget<T> {}
 
 fn tick_test_animation(
     mut tracker: Local<usize>,
-    target: Single<(&mut TestTarget, &Tick<TestAnimation>)>,
+    target: Single<(&mut TestTarget<TestAnimation>, &Tick<TestAnimation>)>,
 ) {
     let (mut target, tick) = target.into_inner();
     // this do-si-do is to verify i got the system param stuff in workable state
@@ -91,31 +116,92 @@ impl Animation for TestAnimation {
     }
 
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        self.duration
+        duration(0.5)
     }
 }
+
+fn tick_test_animation2(
+    mut tracker: Local<usize>,
+    target: Single<
+        (
+            &mut TestTarget<TestAnimation2>,
+            &PersistentTick<TestAnimation2>,
+        ),
+        Without<Tick<TestAnimation2>>,
+    >,
+) {
+    let (mut target, tick) = target.into_inner();
+    let Some(tick) = **tick else {
+        return;
+    };
+    // this do-si-do is to verify i got the system param stuff in workable state
+    *tracker += 1;
+    target.local = *tracker;
+    target.t = tick.t;
+    target.dt += tick.dt;
+}
+
+impl Animation for TestAnimation2 {
+    fn system() -> (impl bevy_ecs::schedule::ScheduleLabel, TickSystemConfigs) {
+        (Update, tick_test_animation2.into_configs())
+    }
+
+    fn configuration(&self) -> impl Into<AnimationConfiguration> {
+        duration(0.55)
+    }
+}
+
+#[derive(Resource, Default)]
+struct Animation1Finished(bool);
+
+#[derive(Resource, Default)]
+struct Animation2Finished(bool);
 
 #[test]
 fn test_basics() {
     let mut app = App::new();
     app.add_plugins(TimePlugin)
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+            1.0 / 60.0,
+        )))
+        .init_resource::<Animation1Finished>()
+        .init_resource::<Animation2Finished>()
         .add_animation::<TestAnimation>()
+        .add_animation::<TestAnimation2>()
         .add_systems(Startup, |mut commands: Commands| {
-            commands.spawn(TestAnimation { duration: 1.0 });
-        });
+            commands.spawn((TestAnimation, TestAnimation2));
+        })
+        .add_observer(
+            |_: On<AnimationFinished<TestAnimation>>, mut finished: ResMut<Animation1Finished>| {
+                finished.0 = true;
+            },
+        )
+        .add_observer(
+            |_: On<AnimationFinished<TestAnimation2>>, mut finished: ResMut<Animation2Finished>| {
+                finished.0 = true;
+            },
+        );
     // back to back to back to back frames. the GPU is strong with this one
-    app.update();
-    app.update();
-    app.update();
-    app.update();
-    let mut query = app.world_mut().query::<&TestTarget>();
-    let target = query.single(app.world()).unwrap();
     // pretty basic test, just make sure we got called and time moves like we expect
-    // (exact times depend on the timing of calling update so we aren't going to check that, but
-    // more than zero, and dt accumulation ~ t checks things work as expected)
-    assert_eq!(target.local, 4);
+    let ticks = 40; // few ticks too many to make sure we stop accumulating after finish
+    for _ in 0..ticks {
+        app.update();
+    }
+    let mut query = app.world_mut().query::<&TestTarget<TestAnimation>>();
+    let target = *query.single(app.world()).unwrap();
+    assert_eq!(target.local, 30); // exactly half a second at 60fps
     assert!(target.t > 0.0);
     assert_float_eq!(target.t, target.dt, abs <= 0.001);
+
+    let mut query = app.world_mut().query::<&TestTarget<TestAnimation2>>();
+    let target = *query.single(app.world()).unwrap();
+    assert_eq!(target.local, 33); // cheaty copy from the failure! but it's right
+    assert!(target.t > 0.0);
+    assert_float_eq!(target.t, target.dt, abs <= 0.001);
+
+    // since we ran for half a second at 60fps we should always be finished
+    assert!(app.world().resource_ref::<Animation1Finished>().0);
+    assert!(app.world().resource_ref::<Animation2Finished>().0);
 
     // the rest is handled in examples, which are more fun to maintain and verify
 }

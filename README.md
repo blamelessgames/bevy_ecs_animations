@@ -12,14 +12,14 @@ An ECS approach to procedural animation in the Bevy engine
 - See the new [basic example](examples/basic.rs), the updated documentation, and the [Quick Start](#quick-start) below.
 
 ## What is it?
-This crate gives you a lightweight, opinionated timeline manager with minimal ceremony. You define a normal `Component` that implements the `Animation` trait, add it to the app, and insert instances on entities you want to animate.
+This crate gives you a lightweight, opinionated timeline manager with minimal ceremony. You define a normal `Component` that implements the `Animation` trait, add it to the app with `add_animation`, and insert instances on entities you want to animate.
 
-While the animation is active, a Tick component is automatically added to the entity. Your system reads this Tick to know where you are in the timeline (t, normalized_t, dt, etc.).
+While the animation is active, a Tick component is automatically added to the entity. Your system reads this Tick to know where you are in the timeline (via `t`, `normalized_t`, `dt`, and `repetition`).
 
 Everything else — what you animate, how you react to progress, easing, state machines, etc. — is up to you.
 
 ## How to use it
-(see examples!)
+(also see the examples)
 
 ### Installation
 ```sh
@@ -76,8 +76,9 @@ fn run_app() -> AppExit {
 ## Features
 - Component-driven animations with typed compile-time ECS access. Your animations are
   normal components, you write an ordinary system that runs in the context of the timeline
-- Bevy-friendly API - control animation parameters directly from animation components,
-  react by observing the entity, interact using a system param, or issue commands.
+- Bevy-friendly API - you write normal Bevy systems, control animation parameters directly
+  from animation components, react by observing the entity, and interact using a system param
+  or by issuing commands.
 - No restrictions on what properties or types can be animated, if you want to use a curve that
   produces `(UiTransform, TextColor)` to make some text pop we are here for it. If you want
   to target arbitrary entities from one tick system, you'll have to do the work to make that happen,
@@ -112,6 +113,10 @@ This plugin has an optional experimental module that offers const combinators th
 
 ## Why?
 I wanted to procedurally animate some text, and I found the Bevy animation plugin to be a little clunky for the task. I decided to make something that uses a different approach to creating animations, leaning into the Rust type system and the Bevy ECS, in particular with strongly-typed queries and influence over scheduling, so animation ticking systems can be parallelized. This plugin focuses on opinionated timeline management, and tries to leave everything else up to the user (with reasonable defaults).
+
+I haven't worked up a benchmark yet but I use it in my game to coordinate hundred of ongoing animations with very little CPU time taken at all and I'm pretty sure I could push it to thousands without needing to think about it. 
+
+It's deliberately lightweight, a building block rather than an interesting feature on its own, but it's a good foundation and I have interesting plans for it, and I found it a very useful way to organize the animation in my game so I figured I'd share it
 
 ## What it doesn't do
 - No glTF support, I don't use it, so I don't even know what it would take and I doubt it'll ever come up for me.

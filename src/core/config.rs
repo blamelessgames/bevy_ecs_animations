@@ -1,3 +1,5 @@
+use crate::core::AnimationTickState;
+
 /// Encapsulates the configuration for an animation. Construct using the [From]
 /// implementation for f32, which supplies the duration, the minimal requirement.
 ///
@@ -66,10 +68,10 @@
 /// AnimationConfiguration::from(4.0).trigger_events(false);
 /// ```
 ///
-/// The plugin will also do a little cleanup for you. By default, the animation component (and associated internal state) will be
-/// removed from the entity on finish. This causes an archetype move and also means you cannot reset the animation or read the state.
-/// If you prefer, you can have the plugin do nothing (which means it can be restarted via [commands](super::AnimationCommandsExt) or an
-/// [`AnimationController`](super::AnimationController))
+/// The plugin will also do a little cleanup for you. By default, the animation component and associated state components will be
+/// removed from the entity on finish. This causes an archetype move and also means you cannot reset the animation or read the
+/// state. If you prefer, you can have the plugin do nothing, which means it can be restarted via
+/// [commands](super::AnimationCommandsExt) or an [`AnimationController`](super::AnimationController).
 /// ```
 /// # use bevy_ecs_animations::AnimationConfiguration;
 /// AnimationConfiguration::from(4.0).remove_nothing();
@@ -81,7 +83,7 @@
 /// AnimationConfiguration::from(4.0).despawn_entity();
 /// ```
 ///
-/// If for some reason you want the default back, it's here
+/// Or if you want the default back, it's here
 /// ```
 /// # use bevy_ecs_animations::AnimationConfiguration;
 /// AnimationConfiguration::from(4.0).remove_animation();
@@ -90,10 +92,15 @@
 /// That's it so far!
 #[derive(Debug, Copy, Clone)]
 pub struct AnimationConfiguration {
-    pub(super) duration: f32,
-    pub(super) start: f32,
+    /// second to count off before ticking the timeline. happens before any repetitions
     pub(super) delay: f32,
+    /// seconds to tick off the timeline before starting the animation
+    pub(super) start: f32,
+    /// total duration of the animation in seconds, starts ticking after delay
+    pub(super) duration: f32,
+    /// set forward or reverse
     pub(super) mode: PlaybackMode,
+    /// total number of times to run the animation. delay
     pub(super) repetitions: u32,
     pub(super) paused: bool,
     pub(super) events: bool,
@@ -110,7 +117,7 @@ impl AnimationConfiguration {
     /// handles the logic of turning last frame's elapsed time + this frame's dt into t and dt values
     /// for the animation's tick method, and also determines if it finished, or if there's no reason
     /// to tick
-    pub(super) const fn t(&self, elapsed: f32, dt: f32) -> Option<(f32, f32, bool)> {
+    pub(super) const fn t(&self, elapsed: f32, dt: f32) -> Option<AnimationTickState> {
         let start = self.start;
         let end = start + self.duration;
         let now = elapsed + dt;
@@ -122,21 +129,57 @@ impl AnimationConfiguration {
         // if it's over, say so
         if now >= end {
             // adjust the dt
-            Some((produced_end, (end - elapsed), true))
+            Some(AnimationTickState {
+                t: produced_end,
+                dt: end - elapsed,
+                finished: true,
+            })
         // if its still before the start, say so
         } else if now < start {
             None
         // otherwise everything is great!
         } else {
-            Some((produced_now, dt, false))
+            Some(AnimationTickState {
+                t: produced_now,
+                dt,
+                finished: false,
+            })
         }
     }
 }
 
+/// An AnimationConfiguration that runs for 3,600 seconds
+/// with 4.3ish billion repetitions
+#[inline]
+pub const fn forever() -> AnimationConfiguration {
+    AnimationConfiguration::forever()
+}
+
+/// A helper because writing `AnimationConfiguration::duration()`
+/// gets old and (10.0).into() feels off
+#[inline]
+pub const fn duration(duration: f32) -> AnimationConfiguration {
+    AnimationConfiguration::duration(duration)
+}
+
 impl AnimationConfiguration {
-    /// Create a new configuration with a duration
+    /// One hour, repeated 4,294,967,295 times
+    ///
+    /// *technically nowhere near forever
+    #[inline]
+    pub const fn forever() -> Self {
+        Self::duration(3_600.0).repeat(u32::MAX)
+    }
+
+    /// Create a new configuration with a duration.
+    ///
+    /// Panics if duration is not finite and positive.
+    #[inline]
     pub const fn duration(duration: f32) -> Self {
-        debug_assert!(duration >= 0.0, "negative durations cannot be set");
+        assert!(
+            duration.is_finite() && duration > 0.0,
+            "Duration must be finite and positive"
+        );
         Self {
             duration,
             start: 0.0,
@@ -145,7 +188,7 @@ impl AnimationConfiguration {
             repetitions: 1,
             paused: false,
             events: true,
-            removal: RemovalOptions::Component,
+            removal: RemovalOptions::Default,
         }
     }
 
@@ -153,17 +196,25 @@ impl AnimationConfiguration {
     ///
     /// Defaults to 0.0
     ///
-    /// Must not be negative.
+    /// Must be finite and cannot be negative.
+    #[inline]
     pub const fn start_at(mut self, start: f32) -> Self {
-        debug_assert!(start >= 0.0, "start cannot be negative");
+        assert!(
+            start.is_finite() && start >= 0.0,
+            "Start must be finite and cannot be negative"
+        );
         self.start = start;
         self
     }
 
     /// Seconds to "tick off" the timeline before it officially starts.
     ///
+    #[inline]
     pub const fn delay_by(mut self, delay: f32) -> Self {
-        debug_assert!(delay >= 0.0, "delay cannot be negative");
+        assert!(
+            delay.is_finite() && delay >= 0.0,
+            "Delay must be finite and cannot be negative"
+        );
         self.delay = delay;
         self
     }
@@ -171,12 +222,14 @@ impl AnimationConfiguration {
     /// Play the animation in forward order
     ///
     /// This is the default
+    #[inline]
     pub const fn play_forward(mut self) -> Self {
         self.mode = PlaybackMode::Forward;
         self
     }
 
     /// Play the animation in reverse
+    #[inline]
     pub const fn play_in_reverse(mut self) -> Self {
         self.mode = PlaybackMode::Reverse;
         self
@@ -184,6 +237,7 @@ impl AnimationConfiguration {
 
     /// set repetition count. 0 is valid but results in an animation that finishes
     /// immediately
+    #[inline]
     pub const fn repeat(mut self, repetitions: u32) -> Self {
         self.repetitions = repetitions;
         self
@@ -192,6 +246,7 @@ impl AnimationConfiguration {
     /// pass `true` to pause at start, doing nothing until you intervene
     ///
     /// default is `false`
+    #[inline]
     pub const fn start_paused(mut self, paused: bool) -> Self {
         self.paused = paused;
         self
@@ -200,6 +255,7 @@ impl AnimationConfiguration {
     /// pass `false` to disable triggering documented events
     ///
     /// default is `true`
+    #[inline]
     pub const fn trigger_events(mut self, events: bool) -> Self {
         self.events = events;
         self
@@ -208,12 +264,14 @@ impl AnimationConfiguration {
     /// When the animation is finished, remove the component + internal state from the entity
     ///
     /// this is the default.
+    #[inline]
     pub const fn remove_animation(mut self) -> Self {
-        self.removal = RemovalOptions::Component;
+        self.removal = RemovalOptions::AnimationComponents;
         self
     }
 
     /// When the animation is finished, despawn the entity
+    #[inline]
     pub const fn despawn_entity(mut self) -> Self {
         self.removal = RemovalOptions::Entity;
         self
@@ -222,6 +280,7 @@ impl AnimationConfiguration {
     /// When the animation is finished, leave everything sitting there. Animations can be
     /// restarted with [commands](super::AnimationCommandsExt) or an
     /// [`AnimationController`](super::AnimationController)
+    #[inline]
     pub const fn remove_nothing(mut self) -> Self {
         self.removal = RemovalOptions::Nothing;
         self
@@ -234,9 +293,15 @@ pub(super) enum PlaybackMode {
     Reverse,
 }
 
+/// define
 #[derive(Debug, Copy, Clone)]
 pub(super) enum RemovalOptions {
-    Component,
+    /// in default this depends on whatever the user enabled persistent ticks
+    Default,
+    /// remove animation component + associated components from the entity default for normal ticks
+    AnimationComponents,
+    /// despawn the entity
     Entity,
+    /// do nothing, default for persistent ticks
     Nothing,
 }

@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    hash::Hash,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
@@ -12,7 +13,7 @@ use bevy_ecs::{
     lifecycle::{Insert, Remove},
     observer::On,
     query::Has,
-    schedule::{IntoScheduleConfigs, ScheduleConfigs, ScheduleLabel},
+    schedule::{IntoScheduleConfigs, ScheduleConfigs, ScheduleLabel, SystemSet},
     system::{Commands, Query, Res, ScheduleSystem, SystemParam},
     world::{EntityWorldMut, World},
 };
@@ -26,7 +27,11 @@ mod test;
 
 pub use config::*;
 
-/// Core trait to define a component as an animation.
+/// Core trait to define a [`Component`] as an animation, which associates it with a
+/// system that inserts [`Tick`] `Components` on entities that have the animation
+/// inserted, according to a timeline configured by the component instance.
+///
+/// Use it like
 /// ```
 /// use bevy::{
 ///     prelude::*,
@@ -64,16 +69,38 @@ pub use config::*;
 ///         });
 /// }
 /// ```
+///
+/// Your tick system will run within the context of timeline management, which maintains
+/// a per-animation-type `Tick` component on entities that have your animation inserted.
+/// A `Tick` will be inserted on frames that occur while the timeline is active (started,
+/// not paused, and not finished), and it will be removed on inactive frames (delayed,
+/// paused, or finished).
+///
+/// You can do whatever Bevy supports in this system. You can update a single property
+/// on a single entity or coordinate a series of separate animations on hundreds of
+/// entities.
+///
+/// If you'd prefer to avoid insertion and removal costs for the `Tick` component, see
+/// [`PersistentTick`].
 pub trait Animation: Component + 'static {
-    /// Information for the animation's tick system. In a generic context this is a little odd but bearable:
-    /// ```no_run
+    /// Configuration for the animation's tick system, which can be any valid Bevy system.
+    ///
+    /// Your system will be scheduled between this plugin's internal systems, one that prepares
+    /// your tick and one that clean things up.
+    ///
+    /// In a generic context the syntax is a little odd but bearable, you need to explicitly
+    /// call [`into_configs`](bevy_ecs::schedule::IntoScheduleConfigs::into_configs) on your
+    /// system
+    /// ```ignore
+    /// fn tick_system() { /* doing things */ }
+    ///
     /// fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
     ///     (Update, tick_system.into_configs())
     /// }
     /// ```
     ///
-    /// You have fairly broad control over the schedule
-    /// ```no_run
+    /// You have fairly broad control over the schedule's ordering constraints
+    /// ```ignore
     /// fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
     ///     (
     ///         SomeCustomSchedule,
@@ -85,6 +112,11 @@ pub trait Animation: Component + 'static {
     /// }
     /// ```
     ///
+    /// However run conditions do come with a caveat - they will only apply to your
+    /// system. The internal systems will still run. That means they have limited utility.
+    /// If you want to control an animation, you can use the [`AnimationController`] or
+    /// [commands](AnimationCommandsExt).
+    ///
     /// Note that [`TickSystemConfigs`] is just a nice type alias to make things
     /// readable, there's nothing special about a tick system as far as this crate is concerned
     fn system() -> (impl ScheduleLabel, TickSystemConfigs);
@@ -92,7 +124,7 @@ pub trait Animation: Component + 'static {
     /// The configuration of the animation, minimally a duration.
     /// As [`AnimationConfiguration`] implements `From<f32>` you can just
     /// return that if it's all you need
-    /// ```no_run
+    /// ```ignore
     /// fn configuration(&self) -> impl Into<AnimationConfiguration> {
     ///     2.0
     /// }
@@ -105,19 +137,49 @@ pub trait Animation: Component + 'static {
 
 /// Information about the current state of an active [`Animation`], inserted as a component
 /// on the same entity while the animation is active (i.e. started, not paused, not finished)
+/// and removed from the entity when the animation is not active (i.e. delayed, paused, finished).
+///
+/// Query it in your system like
+/// ```
+/// use bevy::prelude::*;
+/// use bevy_ecs_animations::*;
+///
+/// #[derive(Component)]
+/// struct MyAnimation(f32);
+///
+/// fn ticking_away(mut targets: Query<&Tick<MyAnimation>>) {
+///     // but with more interesting stuff
+/// }
+/// ```
+///
+/// See also [`PersistentTick`]
 #[derive(Component)]
-// maybe SparseSet?
 #[component(immutable)]
-pub struct Tick<A: Animation> {
+pub struct Tick<A> {
+    /// current spot on the timeline, ranging from `start->start + duration`
+    ///
+    /// you will always receive a tick for the last frame of your timeline,
+    /// i.e. animations always run to the very end
     pub t: f32,
+    /// delta time from the previous frame to the current frame
     pub dt: f32,
+    /// t, scaled to [0, 1]
     pub normalized_t: f32,
+    /// current repetitions, 1-based
     pub repetition: u32,
     finished: bool,
     _animation: PhantomData<fn() -> A>,
 }
 
-impl<A: Animation> Debug for Tick<A> {
+impl<A> Clone for Tick<A> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<A> Copy for Tick<A> {}
+
+impl<A> Debug for Tick<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tick")
             .field("t", &self.t)
@@ -125,6 +187,55 @@ impl<A: Animation> Debug for Tick<A> {
             .field("normalized_t", &self.normalized_t)
             .field("repetition", &self.repetition)
             .finish()
+    }
+}
+
+/// A [`Component`] wrapper for an optional [`Tick`], to signal that archetype
+/// changes should be avoided.
+///
+/// `Tick`s are inserted and removed from their entities as a form of timeline
+/// management, which is very convenient but does cause archetype changes.
+///
+/// To disable that behavior, make this a required component of your
+/// [`Animation`] component and use it in your queries instead of `Tick`.
+/// The value will be `None` on frames that are outside the timeline and `Some`
+/// during frames that would normally have `Tick` inserted.
+///
+/// This also signals to the configuration that the default cleanup activity is
+/// to do nothing, which can be overriden.
+/// ```
+/// use bevy::prelude::*;
+/// use bevy_ecs_animations::*;
+///
+/// #[derive(Component)]
+/// #[require(PersistentTick<MyAnimation>)]
+/// struct MyAnimation;
+///
+/// // and the rest..
+/// ```
+#[derive(Component)]
+#[component(immutable)]
+pub struct PersistentTick<A>(Option<Tick<A>>);
+
+impl<A> Default for PersistentTick<A> {
+    fn default() -> Self {
+        PersistentTick(None)
+    }
+}
+
+impl<A> Clone for PersistentTick<A> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<A> Copy for PersistentTick<A> {}
+
+impl<A> Deref for PersistentTick<A> {
+    type Target = Option<Tick<A>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -142,7 +253,7 @@ pub trait AnimationAppExt {
     /// #[derive(Component)]
     /// struct YourAnimation;
     ///
-    /// fn tick_animation(_:Query<&Tick<Animation>>) {
+    /// fn tick_animation(_:Query<&Tick<YourAnimation>>) {
     ///     // animate something. anything. everything!
     /// }
     ///
@@ -158,7 +269,7 @@ pub trait AnimationAppExt {
     ///
     /// fn plugin(app: &mut App) {
     ///     // this makes the magic happen
-    ///     app.add_animation::<Animation>();
+    ///     app.add_animation::<YourAnimation>();
     /// }
     ///
     /// ```
@@ -171,18 +282,69 @@ impl AnimationAppExt for App {
     }
 }
 
+pub struct AnimationSystems<A: Animation>(PhantomData<fn() -> A>);
+
+impl<A: Animation> SystemSet for AnimationSystems<A> {
+    fn dyn_clone(&self) -> Box<dyn SystemSet> {
+        Box::new(*self)
+    }
+}
+
+impl<A: Animation> Debug for AnimationSystems<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", std::any::type_name::<AnimationSystems<A>>())
+    }
+}
+
+impl<A: Animation> Default for AnimationSystems<A> {
+    fn default() -> Self {
+        AnimationSystems(PhantomData)
+    }
+}
+
+impl<A: Animation> Clone for AnimationSystems<A> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<A: Animation> PartialEq for AnimationSystems<A> {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl<A: Animation> Eq for AnimationSystems<A> {}
+
+impl<A: Animation> Copy for AnimationSystems<A> {}
+
+impl<A: Animation> Hash for AnimationSystems<A> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::any::type_name::<AnimationSystems<A>>().hash(state);
+    }
+}
+
 #[derive(Copy, Clone)]
 struct AnimationPlugin<A: Animation>(PhantomData<fn() -> A>);
 
 impl<A: Animation> AnimationPlugin<A> {
     fn ticker(
-        mut animations: Query<(Entity, &mut InternalAnimationState<A>, Has<Tick<A>>)>,
+        mut animations: Query<(
+            Entity,
+            &mut InternalAnimationState<A>,
+            Has<Tick<A>>,
+            Has<PersistentTick<A>>,
+        )>,
         mut commands: Commands,
         time: Res<Time>,
     ) {
-        for (entity, mut state, has_tick) in animations.iter_mut() {
+        for (entity, mut state, has_tick, has_persistent_tick) in animations.iter_mut() {
             if let Some(tick) = state.tick(time.delta_secs()) {
-                commands.entity(entity).insert(tick);
+                if has_persistent_tick {
+                    commands.entity(entity).insert(PersistentTick(Some(tick)));
+                } else {
+                    commands.entity(entity).insert(tick);
+                }
                 continue;
             };
 
@@ -195,16 +357,32 @@ impl<A: Animation> AnimationPlugin<A> {
                         entity.remove::<Tick<A>>();
                     });
             }
+
+            if has_persistent_tick {
+                commands.entity(entity).insert(PersistentTick::<A>(None));
+            }
         }
     }
 
     fn post_tick(
-        mut animations: Query<(Entity, &mut InternalAnimationState<A>, &Tick<A>)>,
+        mut animations: Query<(
+            Entity,
+            &mut InternalAnimationState<A>,
+            Option<&Tick<A>>,
+            Option<&PersistentTick<A>>,
+        )>,
         mut commands: Commands,
     ) {
-        // note! only runs for animations that actually ticked
-        for (entity, mut state, tick) in animations.iter_mut() {
+        for (entity, mut state, maybe_tick, maybe_persistent_tick) in animations.iter_mut() {
+            let Some(tick) = maybe_tick
+                .copied()
+                .or(maybe_persistent_tick.and_then(|maybe| maybe.0))
+            else {
+                return;
+            };
+
             if tick.finished {
+                println!("tick {} finished repetition", state.id);
                 state.repetition_finished();
             }
 
@@ -213,8 +391,9 @@ impl<A: Animation> AnimationPlugin<A> {
             }
 
             if state.finished() {
-                // if we're all done, removing the tick ends our involvement
-                commands.entity(entity).remove::<Tick<A>>();
+                if maybe_tick.is_some() {
+                    commands.entity(entity).remove::<Tick<A>>();
+                }
 
                 if state.configuration.events {
                     commands.entity(entity).trigger(animation_finished::<A>);
@@ -223,13 +402,18 @@ impl<A: Animation> AnimationPlugin<A> {
                 // so we should warn on things going wrong since that's the user asking
                 // for the wrong thing
                 match state.configuration.removal {
-                    RemovalOptions::Component => {
-                        commands.entity(entity).remove::<A>();
+                    RemovalOptions::AnimationComponents => {
+                        commands.entity(entity).remove::<(A, PersistentTick<A>)>();
                     }
                     RemovalOptions::Entity => {
                         commands.entity(entity).despawn();
                     }
-                    RemovalOptions::Nothing => { /* just so */ }
+                    // annoyingly can not combine this because guards apply to the whole arm?
+                    // might be an option here...
+                    RemovalOptions::Default if maybe_tick.is_some() => {
+                        commands.entity(entity).remove::<(A, Tick<A>)>();
+                    }
+                    RemovalOptions::Default | RemovalOptions::Nothing => { /* just so */ }
                 }
             }
         }
@@ -252,7 +436,8 @@ impl<A: Animation> Plugin for AnimationPlugin<A> {
                 tick_system,
                 AnimationPlugin::<A>::post_tick,
             )
-                .chain(),
+                .chain()
+                .in_set(AnimationSystems::<A>::default()),
         )
         .add_observer(on_insert::<A>)
         .add_observer(on_remove::<A>)
@@ -276,9 +461,7 @@ fn on_remove<A: Animation>(state: On<Remove<A>>, mut commands: Commands) {
         .entity(state.entity)
         // silenced because if this was a despawn, bevy complains
         .queue_silenced(|mut entity: EntityWorldMut| {
-            entity
-                .remove::<InternalAnimationState<A>>()
-                .remove::<Tick<A>>();
+            entity.remove::<(InternalAnimationState<A>, Tick<A>)>();
         });
 }
 
@@ -302,7 +485,7 @@ fn animation_repeated<A: Animation>(entity: Entity) -> AnimationRepeated<A> {
 #[derive(Debug, Clone, Copy)]
 pub struct AnimationState {
     elapsed: f32,
-    last_dt: f32,
+    // last_dt: f32,
     repetitions_remaining: u32,
     finished: bool,
     paused: bool,
@@ -313,23 +496,25 @@ impl Default for AnimationState {
     fn default() -> Self {
         Self {
             elapsed: 0.0,
-            last_dt: 0.0,
+            // last_dt: 0.0,
             repetitions_remaining: 0,
             finished: false,
             paused: false,
-            configuration: (0.0).into(),
+            // duration can't be zero. this never gets used anyway
+            configuration: (1.0).into(),
         }
     }
 }
 
 impl AnimationState {
     fn repetition_finished(&mut self) {
+        println!("repetition finished : {}", self.repetitions_remaining);
         self.repetitions_remaining -= 1;
         if self.repetitions_remaining == 0 {
             self.finished = true;
         } else {
             self.elapsed = 0.0;
-            self.last_dt = 0.0;
+            //self.last_dt = 0.0;
         }
     }
 
@@ -339,10 +524,10 @@ impl AnimationState {
         self.elapsed
     }
 
-    /// last delta time of the tick system's contextual [`Time`] resource
-    pub const fn last_dt(&self) -> f32 {
-        self.last_dt
-    }
+    // /// last delta time of the tick system's contextual [`Time`] resource
+    // pub const fn last_dt(&self) -> f32 {
+    //     self.last_dt
+    // }
 
     pub const fn repetitions(&self) -> u32 {
         self.configuration.repetitions
@@ -367,12 +552,15 @@ impl AnimationState {
 
 #[derive(Component, Clone, Copy)]
 struct InternalAnimationState<A> {
+    id: u16,
     // the public part of the state
     state: AnimationState,
-    // the elapsed timer for delays
-    delay: f32,
+    // the real elapsed timer outside delays
+    total_elapsed: f32,
     // if the animation just repeated
     just_repeated: bool,
+    // saving divisions in every frame
+    inv_duration: f32,
     _animation: PhantomData<fn() -> A>,
 }
 
@@ -392,10 +580,13 @@ impl<A> DerefMut for InternalAnimationState<A> {
 
 impl<A> Default for InternalAnimationState<A> {
     fn default() -> Self {
+        static ID: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
         InternalAnimationState {
+            id: ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             state: Default::default(),
-            delay: 0.0,
+            total_elapsed: 0.0,
             just_repeated: false,
+            inv_duration: 0.0,
             _animation: PhantomData,
         }
     }
@@ -419,71 +610,66 @@ impl<A> InternalAnimationState<A> {
     }
 
     fn reset(&mut self, configuration: AnimationConfiguration) {
-        self.delay = 0.0;
+        self.total_elapsed = 0.0;
         self.just_repeated = false;
         self.state = AnimationState {
             elapsed: 0.0,
-            last_dt: 0.0,
+            //last_dt: 0.0,
             repetitions_remaining: configuration.repetitions,
             finished: configuration.repetitions == 0,
             paused: configuration.paused,
             configuration,
         };
+        // duration is always finite and positive so this is safe
+        self.inv_duration = 1.0 / configuration.duration;
     }
 
     fn finish(&mut self) {
-        self.state.elapsed = (self.state.configuration.duration + self.state.configuration.start)
-            - (self.state.last_dt * 0.5);
+        // if you're running at more than 1000 fps you're gonna get a few frames which seems fine
+        self.state.elapsed =
+            (self.state.configuration.duration + self.state.configuration.start) - 0.001;
         self.state.repetitions_remaining = 0;
     }
 }
 
 impl<A: Animation> InternalAnimationState<A> {
-    #[inline]
-    fn normalized_t(&self, t: f32) -> f32 {
-        let start = self.state.configuration.start;
-        let end = start + self.state.configuration.duration;
-
-        if start == end {
-            0.0
-        } else {
-            (t - start) / (end - start)
-        }
-    }
-
-    fn tick(&mut self, dt: f32) -> Option<Tick<A>> {
+    fn tick(&mut self, dt_in: f32) -> Option<Tick<A>> {
         // paused and finished animations do nothing
-        if self.state.paused || self.state.finished {
+        if self.state.paused || self.state.finished || dt_in <= 0.0 {
             return None;
         }
 
         // first, treat delay as being entirely outside the timeline
         // return until we've sunk it all, be sure to account for leftover dt
         // this behavior may become configurable
-        let delay = self.configuration.delay;
-        let mut leftover_dt = 0.0;
-        if self.delay < delay {
-            self.delay += dt;
-            if self.delay >= delay {
-                leftover_dt += delay - self.delay;
-            } else {
-                return None;
-            }
+        let in_delay = self.total_elapsed < self.configuration.delay;
+        self.total_elapsed += dt_in;
+
+        let dt = if in_delay && self.total_elapsed <= self.configuration.delay {
+            return None;
+        } else if in_delay {
+            self.total_elapsed - self.configuration.delay
+        } else {
+            dt_in
+        };
+
+        if dt <= 0.0 {
+            println!("somehow we got here with no dt");
         }
-        let dt = dt + leftover_dt;
 
         // now we get to  ask configuration for what really happened!
-        let Some((t, dt, finished)) = self.state.configuration.t(self.state.elapsed, dt) else {
+        let Some(AnimationTickState { t, dt, finished }) =
+            self.state.configuration.t(self.state.elapsed, dt)
+        else {
             // if None, we're outside the ticking range, just accumulate
-            self.state.last_dt = dt;
+            // self.state.last_dt = dt;
             self.state.elapsed += dt;
             return None;
         };
         // otherwise accumulate what might be trimmed
-        self.state.last_dt = dt;
+        // self.state.last_dt = dt;
         self.state.elapsed += dt;
-
-        let normalized_t = self.normalized_t(t);
+        let normalized_t = (t - self.configuration.start) * self.inv_duration;
 
         Some(Tick {
             t,
@@ -494,6 +680,12 @@ impl<A: Animation> InternalAnimationState<A> {
             _animation: PhantomData,
         })
     }
+}
+
+struct AnimationTickState {
+    t: f32,
+    dt: f32,
+    finished: bool,
 }
 
 /// Query and control [`Animation`]s
@@ -545,11 +737,18 @@ impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
         self.animations.iter().all(|(_, state)| state.finished)
     }
 
-    pub fn state(&mut self, entity: Entity) -> Option<AnimationState> {
+    pub fn state(&self, entity: Entity) -> Option<AnimationState> {
         self.animations
             .get(entity)
             .ok()
-            .map(|(_, state)| state.into())
+            .map(|(_, state)| state.state)
+    }
+
+    pub fn states(&self) -> Vec<AnimationState> {
+        self.animations
+            .iter()
+            .map(|(_, state)| state.state)
+            .collect()
     }
 
     pub fn flip_pause(&mut self, entity: Entity) -> &mut Self {
