@@ -1,5 +1,10 @@
 # Changes
 
+### 0.20.0
+- updated to bevy 0.20
+- removed deprecated code
+- new "cascase" example, thanks @bokubeam!
+
 ### 0.19.2
 - deprecated the existing API and made it much simpler and amenable to a derive macro
 

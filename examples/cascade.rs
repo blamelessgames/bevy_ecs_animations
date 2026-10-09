@@ -1,6 +1,7 @@
 //! Example of UI menu items timing their animation based on the y-height of
 //! the screen, creating a cascading effect
 use bevy::prelude::*;
+use bevy::ui_widgets::Button;
 use bevy_ecs_animations::*;
 
 /// Duration of the local animation for a UI Element
@@ -91,16 +92,25 @@ pub fn menu() -> impl Scene {
             padding: percent(10),
         }
         Children [
-            menu_button("Option 1"),
-            menu_button("Option 2"),
-            menu_button("Option 3"),
-            menu_button("Option 4"),
-            menu_button("Option 5"),
-            menu_button("Option 6"),
-            menu_button("Option 7"),
-            menu_button("Option 8"),
-            menu_button("Option 9"),
-            menu_button("Option 10"),
+            @{menu_button("Option 1")}
+            --
+            @{menu_button("Option 2")}
+            --
+            @{menu_button("Option 3")}
+            --
+            @{menu_button("Option 4")}
+            --
+            @{menu_button("Option 5")}
+            --
+            @{menu_button("Option 6")}
+            --
+            @{menu_button("Option 7")}
+            --
+            @{menu_button("Option 8")}
+            --
+            @{menu_button("Option 9")}
+            --
+            @{menu_button("Option 10")}
         ]
     }
 }
@@ -111,13 +121,11 @@ pub fn menu_button(name: &'static str) -> impl Scene {
         Button
         Node
         Children [
-            (
-                CascadeIn // the Animation component
-                Text({name})
-                TextFont {
-                    font_size: FontSize::Vh(7.0),
-                }
-            ),
+            CascadeIn // the Animation component
+            Text({name})
+            TextFont {
+                font_size: FontSize::Vh(7.0),
+            }
         ]
     }
 }

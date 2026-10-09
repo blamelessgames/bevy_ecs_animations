@@ -20,13 +20,11 @@ use bevy_time::Time;
 
 // bye bye, old
 mod config;
-mod deprecated;
 
 #[cfg(test)]
 mod test;
 
 pub use config::*;
-pub use deprecated::*;
 
 /// Core trait to define a component as an animation.
 /// ```
@@ -263,7 +261,7 @@ impl<A: Animation> Plugin for AnimationPlugin<A> {
 }
 
 fn on_insert<A: Animation>(
-    add_animation: On<Insert, A>,
+    add_animation: On<Insert<A>>,
     mut animations: Query<(&A, &mut InternalAnimationState<A>)>,
 ) {
     // this serves as the initialization phase
@@ -273,7 +271,7 @@ fn on_insert<A: Animation>(
     state.reset(animation.configuration().into());
 }
 
-fn on_remove<A: Animation>(state: On<Remove, A>, mut commands: Commands) {
+fn on_remove<A: Animation>(state: On<Remove<A>>, mut commands: Commands) {
     commands
         .entity(state.entity)
         // silenced because if this was a despawn, bevy complains

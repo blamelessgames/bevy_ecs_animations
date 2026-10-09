@@ -3,7 +3,8 @@ use std::{
     ops::{Add, Mul, Sub},
 };
 
-use bevy_math::{Curve, FloatExt, StableInterpolate, curve::Interval};
+use bevy_curve::{Curve, Interval};
+use bevy_math::{FloatExt, StableInterpolate};
 
 /// just a helper for type-erased curve storage in bevy
 pub type BoxedCurve<T> = Box<dyn Curve<T> + Send + Sync + 'static>;
@@ -424,6 +425,7 @@ where
 #[test]
 fn test_combinators() {
     // i'm not sure if any of this is useful tbh
+    use bevy_curve::EaseFunction;
     use bevy_math::prelude::*;
     const fn crazy() -> impl Curve<(Vec3, Vec4)> {
         zip(
