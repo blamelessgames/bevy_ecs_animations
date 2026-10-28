@@ -6,12 +6,6 @@
 
 An ECS approach to procedural animation in the Bevy engine
 
-## Important: API Transition (v0.19.2)
-
-**The old `EntityAnimation` trait and `EntityAnimationPlugin` have been deprecated** in favor of the much simpler `Animation` trait + `add_animation` API.
-
-The old API still works but will emit deprecation warnings. It will be removed in a future release.
-
 ### Quick Migration
 - `EntityAnimation` → `Animation`
 - `EntityAnimationPlugin::<T>` → `.add_animation::<T>()`
@@ -93,13 +87,14 @@ fn run_app() -> AppExit {
   or even make a complicated compile-time curve if you want to write down insane type names.
 
 ## Requirements
-- Bevy 0.19
+- Bevy 0.20
 - MSRV: 1.95.0. This plugin will generally follow Bevy's lead here
 
 ### Compatibility
 Generally, this plugin will track Bevy versions. Since Bevy is currently pre-1.0, this means we match minor version. Specifically:
 |bevy|bevy_ecs_animations|
 |-|-|
+|0.20.x|0.20.x|
 |0.19.x|0.19.x|
 
 ### Fair Warning!
