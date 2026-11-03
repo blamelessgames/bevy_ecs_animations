@@ -75,7 +75,7 @@ fn run_app() -> AppExit {
 
 ## Requirements
 - Bevy 0.20
-- MSRV: 1.95.0. This plugin will generally follow Bevy's lead here
+- MSRV: 1.97.1. This plugin will generally follow Bevy's lead here
 
 ### Compatibility
 Generally, this plugin will track Bevy versions. Since Bevy is currently pre-1.0, this means we match minor version. Specifically:
