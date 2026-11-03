@@ -131,7 +131,7 @@ struct PleaseSpawnReady;
 // if you want to do something weird with the system, you can define the trait yourself
 impl Animation for PleaseSpawnReady {
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        AnimationConfiguration::from(0.5).despawn_entity()
+        duration(0.5).despawn_entity()
     }
 
     fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
