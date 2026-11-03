@@ -87,8 +87,8 @@
 //! [`Animation`] trait enables the plugin to tick the given system according to configuration, and
 //! in general, you're just writing a normal Bevy ECS code with no restrictions.
 
-// more probably makes sense here but this should hold true until it doesn't
 #![deny(unsafe_code)]
+#![deny(missing_docs)]
 
 #[cfg(feature = "combinators")]
 pub mod combinators;

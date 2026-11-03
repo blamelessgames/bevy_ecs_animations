@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::{
     marker::PhantomData,
     ops::{Add, Mul, Sub},

@@ -28,8 +28,8 @@ bevy = { version = "0.20", features = ["debug"] }
 float_eq = "1.0.1"
 
 [features]
-combinators = ["bevy_curve", "bevy_math/std"]
 default = ["std", "combinators"]
+combinators = ["bevy_curve"]
 std = ["bevy_math/std"]
 libm = ["bevy_math/libm"]
 nostd-libm = ["bevy_math/nostd-libm"]
