@@ -85,7 +85,6 @@ fn tick_ready_letter(
     ready: Single<Entity, With<Ready>>,
     mut commands: Commands,
 ) {
-    let mut count = 0;
     for (ready_letter, mut transform, mut text_color, tick) in ready_letters.iter_mut() {
         let (translation, scale) = ready_letter.transform_curve().sample_clamped(tick.t);
         transform.translation = translation;
@@ -94,18 +93,12 @@ fn tick_ready_letter(
             .text_color_curve()
             .sample_clamped(tick.t)
             .into();
-        count += 1;
-    }
-
-    if count != 5 {
-        // println!("{:#?}", ready_letters_controller.states());
     }
 
     // this is probably the simplest way to know if a bunch of animations are done
     // since this system has a `Single` query, despawning the entity from the query
     // means this system gets disabled until another entity gets spawned, by PleaseSpawnReady
     if ready_letters_controller.all_finished() {
-        println!("all finished!");
         commands.entity(*ready).despawn();
         commands.spawn(PleaseSpawnReady);
     }

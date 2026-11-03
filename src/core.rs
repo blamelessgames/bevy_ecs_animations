@@ -382,7 +382,6 @@ impl<A: Animation> AnimationPlugin<A> {
             };
 
             if tick.finished {
-                println!("tick {} finished repetition", state.id);
                 state.repetition_finished();
             }
 
@@ -508,7 +507,6 @@ impl Default for AnimationState {
 
 impl AnimationState {
     fn repetition_finished(&mut self) {
-        println!("repetition finished : {}", self.repetitions_remaining);
         self.repetitions_remaining -= 1;
         if self.repetitions_remaining == 0 {
             self.finished = true;
@@ -552,7 +550,6 @@ impl AnimationState {
 
 #[derive(Component, Clone, Copy)]
 struct InternalAnimationState<A> {
-    id: u16,
     // the public part of the state
     state: AnimationState,
     // the real elapsed timer outside delays
@@ -580,9 +577,7 @@ impl<A> DerefMut for InternalAnimationState<A> {
 
 impl<A> Default for InternalAnimationState<A> {
     fn default() -> Self {
-        static ID: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
         InternalAnimationState {
-            id: ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             state: Default::default(),
             total_elapsed: 0.0,
             just_repeated: false,
@@ -652,10 +647,6 @@ impl<A: Animation> InternalAnimationState<A> {
         } else {
             dt_in
         };
-
-        if dt <= 0.0 {
-            println!("somehow we got here with no dt");
-        }
 
         // now we get to  ask configuration for what really happened!
         let Some(AnimationTickState { t, dt, finished }) =
