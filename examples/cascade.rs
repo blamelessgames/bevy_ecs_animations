@@ -13,23 +13,16 @@ const MAX_DELAY_SECONDS: f32 = 1.5;
 #[derive(Component, Default, Clone, Copy)]
 pub struct CascadeIn;
 
-impl Animation for CascadeIn {
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        // Because the animation is delayed the further down the screen the
-        // UI element is, and all the animations have to be the same length,
-        // make the animation lengths be long enough to fit the longest
-        // possible animation.
-        AnimationConfiguration::from(DURATION_SECONDS + MAX_DELAY_SECONDS)
-            // Repeat the animation in order to demonstrate its effect.
-            // Remove this for actual use.
-            .repeat(5000)
-    }
-
-    fn system() -> (impl bevy_ecs::schedule::ScheduleLabel, TickSystemConfigs) {
-        (Update, cascade_in.into_configs())
-    }
-}
-
+#[animation(config = {
+    // Because the animation is delayed the further down the screen the
+    // UI element is, and all the animations have to be the same length,
+    // make the animation lengths be long enough to fit the longest
+    // possible animation.
+    duration(DURATION_SECONDS + MAX_DELAY_SECONDS)
+        // Repeat the animation in order to demonstrate its effect.
+        // Remove this for actual use.
+        .repeat(5000)
+})]
 fn cascade_in(
     window: Single<&Window>,
     mut anim: Query<(

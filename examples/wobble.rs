@@ -1,11 +1,8 @@
 //! a bunch of animations doing things without much ceremony
 use std::f32::consts::*;
 
-use bevy::{color::palettes::css::*, ecs::schedule::ScheduleLabel, prelude::*};
-use bevy_ecs_animations::{
-    Animation, AnimationAppExt, AnimationCommandsExt, AnimationConfiguration, AnimationFinished,
-    PersistentTick, Tick, TickSystemConfigs, animation, duration,
-};
+use bevy::{color::palettes::css::*, prelude::*};
+use bevy_ecs_animations::*;
 
 fn main() -> AppExit {
     App::new()
@@ -67,7 +64,15 @@ enum Fade {
     In,
 }
 
-// this is not a scalable approach, animating materials gets expensive fast, but for one-offs it's okay
+#[animation(config = {
+    match self {
+        Fade::Out => duration(1.4)
+            .start_at(2.1)
+            .play_in_reverse()
+            .remove_nothing(),
+        Fade::In => duration(1.2).start_at(0.5),
+    }
+})]
 fn tick_fade(
     mut materials: ResMut<Assets<StandardMaterial>>,
     faded: Single<(&MeshMaterial3d<StandardMaterial>, &Tick<Fade>)>,
@@ -81,24 +86,6 @@ fn tick_fade(
     material
         .base_color
         .set_alpha(EaseFunction::QuadraticIn.sample_clamped(tick.normalized_t));
-}
-
-impl Animation for Fade {
-    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
-        (Update, tick_fade.into_configs())
-    }
-
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        // leave it in place during the interim between the phases, and let it remove
-        // the animation components at the end of the second phase
-        match self {
-            Fade::Out => duration(1.4)
-                .start_at(2.1)
-                .play_in_reverse()
-                .remove_nothing(),
-            Fade::In => duration(1.2).start_at(0.5),
-        }
-    }
 }
 
 fn input(
