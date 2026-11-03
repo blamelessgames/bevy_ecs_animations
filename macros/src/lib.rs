@@ -1,12 +1,60 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    FnArg, GenericArgument, ItemFn, PatType, PathArguments, Signature, Type, TypePath,
-    TypeReference, TypeTuple, parse_macro_input,
+    FnArg, GenericArgument, ItemFn, Meta, PatType, PathArguments, Signature, Token, Type, TypePath,
+    TypeReference, TypeTuple, parse_macro_input, punctuated::Punctuated,
 };
 
 #[proc_macro_attribute]
-pub fn animation(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn animation(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(
+        attr with Punctuated::<Meta, Token![,]>::parse_terminated
+    );
+
+    let mut config = None;
+    let mut schedule = None;
+
+    for arg in args {
+        match arg {
+            Meta::NameValue(nv) if nv.path.is_ident("config") => {
+                if config.is_some() {
+                    return syn::Error::new_spanned(nv.path, "Duplicate `config` argument")
+                        .to_compile_error()
+                        .into();
+                }
+                config = Some(nv.value);
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("schedule") => {
+                if schedule.is_some() {
+                    return syn::Error::new_spanned(nv.path, "Duplicate `schedule` argument")
+                        .to_compile_error()
+                        .into();
+                }
+                schedule = Some(nv.value);
+            }
+            other => {
+                return syn::Error::new_spanned(
+                    other,
+                    "Expected `config = <expression>` or `schedule = <expression>`",
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+    }
+
+    let config = config.unwrap_or_else(|| {
+        syn::parse_quote! {
+            ::bevy_ecs_animations::forever()
+        }
+    });
+
+    let schedule = schedule.unwrap_or_else(|| {
+        syn::parse_quote! {
+            ::bevy::app::Update
+        }
+    });
+
     let input_fn = parse_macro_input!(item as ItemFn);
 
     let anim_type = match extract_animation_type(&input_fn.sig) {
@@ -24,11 +72,11 @@ pub fn animation(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 impl ::bevy::ecs::schedule::ScheduleLabel,
                 ::bevy_ecs_animations::TickSystemConfigs,
             ) {
-                (::bevy::app::Update, #fn_name.into_configs())
+                (#schedule, #fn_name.into_configs())
             }
 
             fn configuration(&self) -> impl ::std::convert::Into<::bevy_ecs_animations::AnimationConfiguration> {
-                ::bevy_ecs_animations::forever()
+                #config
             }
         }
     };

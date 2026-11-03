@@ -2,10 +2,14 @@
 
 
 ### 0.20.1
-- attribute macro for the simplest case (more to come)
-- PersistentTick, to avoid archetype changes
-- some small internal improvements
+This release includes a few new features to enhance the functionality and ease the use of the crate, as well
+as some general improvements to the code and documentation
+- new attribute macro to define the `Animation` implementation
+- PersistentTick, to avoid archetype changes if desired
+- Added a per-animation type SystemSet (AnimationSystems), exposed for ordering
+- some internal improvements to ticking
 - doc fixes
+- updated MSRV to 1.97.1, missed from the bevy update
 
 ### 0.20.0
 - updated to bevy 0.20

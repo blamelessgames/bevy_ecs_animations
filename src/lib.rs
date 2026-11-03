@@ -14,13 +14,23 @@
 //! Everything else — what you animate, how you react to progress, easing, state machines, etc. — is up to you.
 //!
 //! ## How to use it
-//! (see examples/basic.rs)
+//! (see examples/basic.rs for more info)
 //! ```
 //! use bevy::{
 //!     prelude::*,
 //!     ecs::schedule::ScheduleLabel,
 //! };
 //! use bevy_ecs_animations::*;
+//!
+//! fn run_app() -> AppExit {
+//!     App::new()
+//!         .add_plugins(MinimalPlugins)
+//!         .add_animation::<Fade>() // <-- this ties it all together
+//!         .add_systems(Startup, |mut commands: Commands| {
+//!             commands.spawn((Fade::In, Alpha::default()));
+//!         })
+//!         .run()
+//! }
 //!
 //! #[derive(Component, Default)]
 //! struct Alpha(f32);
@@ -31,33 +41,17 @@
 //!     Out,
 //! }
 //!
+//! // this implements the `Animation` trait for you
+//! #[animation(config = {
+//!     match *self {
+//!         Fade::In => duration(2.5),
+//!         Fade::Out => duration(2.5).play_in_reverse(),
+//!     }
+//! })]
 //! fn tick_fade(mut fades: Query<(&Tick<Fade>, &mut Alpha)>) {
 //!     for (tick, mut alpha) in fades.iter_mut() {
 //!        alpha.0 = tick.normalized_t;
 //!     }
-//! }
-//!
-//! impl Animation for Fade {
-//!     fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
-//!         (Update, tick_fade.into_configs())
-//!     }
-//!
-//!     fn configuration(&self) -> impl Into<AnimationConfiguration> {
-//!         match *self {
-//!             Fade::In => AnimationConfiguration::duration(2.5),
-//!             Fade::Out => AnimationConfiguration::duration(2.5).play_in_reverse(),
-//!         }
-//!     }
-//! }
-//!
-//! fn run_app() -> AppExit {
-//!     App::new()
-//!         .add_plugins(MinimalPlugins)
-//!         .add_animation::<Fade>()
-//!         .add_systems(Startup, |mut commands: Commands| {
-//!             commands.spawn((Fade::In, Alpha::default()));
-//!         })
-//!         .run()
 //! }
 //! ```
 //!
@@ -89,7 +83,7 @@
 //! This plugin takes a more concrete approach. Users define a component that holds relevant animation
 //! state (whatever that happens to be, I'm not the boss of users), implement the [`Animation`] trait
 //! on it, then register the component during app initialization and insert an instance on entities that
-//! should be animated, optionally managing the animation via [`AnimationCommands`] or an [`AnimationController`]. The
+//! should be animated, optionally managing the animation via [`AnimationCommandsExt`] or an [`AnimationController`]. The
 //! [`Animation`] trait enables the plugin to tick the given system according to configuration, and
 //! in general, you're just writing a normal Bevy ECS code with no restrictions.
 
@@ -102,4 +96,34 @@ mod core;
 
 pub use core::*;
 
+/// Implements the [`Animation`] trait for the attributed system for the animation type,
+/// which is inferred by searching the system parameters for a query referencing a
+/// [`Tick`] or [`PersistentTick`] component. If your system configuration is more complicated
+/// than a single system with such a query, you'll need to implement the trait directly
+///
+/// # Arguments
+///
+/// - `config`: An expression producing an [`AnimationConfiguration`], used as the body
+///   of [`configuration`](Animation::configuration()). `self` is available.
+///   Defaults to [`forever()`].
+/// - `schedule`: A Bevy schedule label or expression that returns one.
+///   Defaults to `Update`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// #[derive(Component)]
+/// struct Fade {
+///     duration: f32
+/// }
+///
+/// #[animation(
+///     config = duration(self.duration),
+///     schedule = PostUpdate,
+/// )]
+/// fn fade_animation(fade: Single<(&Tick<Fade>, /* ... */)>) {
+///     // ...
+/// }
+/// ```
+#[doc(inline)]
 pub use bevy_ecs_animations_macros::animation;

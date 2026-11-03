@@ -55,7 +55,7 @@ use crate::core::AnimationTickState;
 /// # use bevy_ecs_animations::AnimationConfiguration;
 /// AnimationConfiguration::from(4.0).start_paused(true);
 /// ```
-/// In this case, you'll have to use a [command](super::AnimationCommands) or [`AnimationController`](super::AnimationController)
+/// In this case, you'll have to use a [command](super::AnimationCommandsExt) or [`AnimationController`](super::AnimationController)
 /// to unpause it before anything animates.
 ///
 /// You can also configure how the plugin behaves when an animation finishes, which means that the animation has
@@ -102,8 +102,11 @@ pub struct AnimationConfiguration {
     pub(super) mode: PlaybackMode,
     /// total number of times to run the animation. delay
     pub(super) repetitions: u32,
+    /// set to start the animation in the paused state
     pub(super) paused: bool,
+    /// whether to trigger events
     pub(super) events: bool,
+    /// behavior for cleanup
     pub(super) removal: RemovalOptions,
 }
 
@@ -296,7 +299,7 @@ pub(super) enum PlaybackMode {
 /// define
 #[derive(Debug, Copy, Clone)]
 pub(super) enum RemovalOptions {
-    /// in default this depends on whatever the user enabled persistent ticks
+    /// in default this depends on whether the user enabled persistent ticks
     Default,
     /// remove animation component + associated components from the entity default for normal ticks
     AnimationComponents,

@@ -6,11 +6,6 @@
 
 An ECS approach to procedural animation in the Bevy engine
 
-### Quick Migration
-- `EntityAnimation` → `Animation`
-- `EntityAnimationPlugin::<T>` → `.add_animation::<T>()`
-- See the new [basic example](examples/basic.rs), the updated documentation, and the [Quick Start](#quick-start) below.
-
 ## What is it?
 This crate gives you a lightweight, opinionated timeline manager with minimal ceremony. You define a normal `Component` that implements the `Animation` trait, add it to the app with `add_animation`, and insert instances on entities you want to animate.
 
@@ -28,10 +23,7 @@ cargo add bevy_ecs_animations
 
 ### Quick Start
 ```rust
-use bevy::{
-    prelude::*,
-    ecs::schedule::ScheduleLabel,
-};
+use bevy::prelude::*;
 use bevy_ecs_animations::*;
 
 #[derive(Component, Default)]
@@ -43,24 +35,18 @@ enum Fade {
     Out,
 }
 
+#[animation(config = {
+    match *self {
+        Fade::In => AnimationConfiguration::duration(2.5),
+        Fade::Out => AnimationConfiguration::duration(2.5).play_in_reverse(),
+    }
+})]
 fn tick_fade(mut fades: Query<(&Tick<Fade>, &mut Alpha)>) {
     for (tick, mut alpha) in fades.iter_mut() {
        alpha.0 = tick.normalized_t;
     }
 }
 
-impl Animation for Fade {
-    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
-        (Update, tick_fade.into_configs())
-    }
-
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        match *self {
-            Fade::In => AnimationConfiguration::duration(2.5),
-            Fade::Out => AnimationConfiguration::duration(2.5).play_in_reverse(),
-        }
-    }
-}
 
 fn run_app() -> AppExit {
     App::new()

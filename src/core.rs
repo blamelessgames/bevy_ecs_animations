@@ -82,6 +82,8 @@ pub use config::*;
 ///
 /// If you'd prefer to avoid insertion and removal costs for the `Tick` component, see
 /// [`PersistentTick`].
+///
+/// See also [`animation`](super::animation) to automatically implement this trait for most cases
 pub trait Animation: Component + 'static {
     /// Configuration for the animation's tick system, which can be any valid Bevy system.
     ///
@@ -131,7 +133,7 @@ pub trait Animation: Component + 'static {
     /// ```
     ///
     /// This is invoked whenever an animation is inserted on an entity, and the returned
-    /// state is used for the duration of that animation instance
+    /// state is used to configure that animation instance
     fn configuration(&self) -> impl Into<AnimationConfiguration>;
 }
 
@@ -239,6 +241,7 @@ impl<A> Deref for PersistentTick<A> {
     }
 }
 
+/// A nice alias
 pub type TickSystemConfigs = ScheduleConfigs<ScheduleSystem>;
 
 /// Extends [`App`] with a registration function for [`Animation`]s, enabling the plugin
@@ -253,18 +256,9 @@ pub trait AnimationAppExt {
     /// #[derive(Component)]
     /// struct YourAnimation;
     ///
+    /// #[animation(config = 1.0)]
     /// fn tick_animation(_:Query<&Tick<YourAnimation>>) {
     ///     // animate something. anything. everything!
-    /// }
-    ///
-    /// impl Animation for YourAnimation {
-    ///     fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
-    ///         (Update, tick_animation.into_configs())
-    ///     }
-    ///
-    ///     fn configuration(&self) -> impl Into<AnimationConfiguration> {
-    ///         1.0 // second
-    ///     }
     /// }
     ///
     /// fn plugin(app: &mut App) {
@@ -282,6 +276,8 @@ impl AnimationAppExt for App {
     }
 }
 
+/// The system set containing all the systems associated to an [`Animation`] type,
+/// exposed for relative ordering
 pub struct AnimationSystems<A: Animation>(PhantomData<fn() -> A>);
 
 impl<A: Animation> SystemSet for AnimationSystems<A> {
@@ -408,7 +404,6 @@ impl<A: Animation> AnimationPlugin<A> {
                         commands.entity(entity).despawn();
                     }
                     // annoyingly can not combine this because guards apply to the whole arm?
-                    // might be an option here...
                     RemovalOptions::Default if maybe_tick.is_some() => {
                         commands.entity(entity).remove::<(A, Tick<A>)>();
                     }
@@ -460,7 +455,7 @@ fn on_remove<A: Animation>(state: On<Remove<A>>, mut commands: Commands) {
         .entity(state.entity)
         // silenced because if this was a despawn, bevy complains
         .queue_silenced(|mut entity: EntityWorldMut| {
-            entity.remove::<(InternalAnimationState<A>, Tick<A>)>();
+            entity.remove::<(InternalAnimationState<A>, Tick<A>, PersistentTick<A>)>();
         });
 }
 
@@ -516,47 +511,48 @@ impl AnimationState {
         }
     }
 
-    /// elapsed time. this always counts up even when the animation counts down
+    /// Wlapsed time of the animation. This always counts up even when the animation counts down.
     /// this is accumulated from the tick system's contextual [`Time`] resource
     pub const fn elapsed(&self) -> f32 {
         self.elapsed
     }
 
-    // /// last delta time of the tick system's contextual [`Time`] resource
-    // pub const fn last_dt(&self) -> f32 {
-    //     self.last_dt
-    // }
-
+    /// The total repetitions the animation is configured to run
     pub const fn repetitions(&self) -> u32 {
         self.configuration.repetitions
     }
 
+    /// the repetitions this animation has remaining
     pub const fn repetitions_remaining(&self) -> u32 {
         self.repetitions_remaining
     }
 
+    /// the current repetition being animated
     pub const fn repetition(&self) -> u32 {
         (self.configuration.repetitions - self.repetitions_remaining) + 1
     }
 
+    /// whether the animation is finished
     pub const fn finished(&self) -> bool {
         self.finished
     }
 
+    /// whether the animation is paused
     pub const fn paused(&self) -> bool {
         self.paused
     }
 }
 
+/// what we do in the shadows
 #[derive(Component, Clone, Copy)]
 struct InternalAnimationState<A> {
-    // the public part of the state
+    /// the public part of the state
     state: AnimationState,
-    // the real elapsed timer outside delays
+    /// the real elapsed timer outside delays
     total_elapsed: f32,
-    // if the animation just repeated
+    /// if the animation just repeated
     just_repeated: bool,
-    // saving divisions in every frame
+    /// saving divisions in every frame
     inv_duration: f32,
     _animation: PhantomData<fn() -> A>,
 }
@@ -679,14 +675,14 @@ struct AnimationTickState {
     finished: bool,
 }
 
-/// Query and control [`Animation`]s
+/// Control and query [`Animation`]s of a given type
 #[derive(SystemParam)]
-pub struct AnimationController<'w, 's, A: Component> {
+pub struct AnimationController<'w, 's, A: Animation> {
     animations: Query<'w, 's, (&'static A, &'static mut InternalAnimationState<A>)>,
 }
 
 impl<'w, 's, A: Animation> AnimationController<'w, 's, A> {
-    /// Reset the specified animation
+    /// Reset the specified animation, which will re-read the configuration
     pub fn reset(&mut self, entity: Entity) -> &mut Self {
         if let Ok((animation, mut state)) = self.animations.get_mut(entity) {
             state.reset(animation.configuration().into());
@@ -694,6 +690,7 @@ impl<'w, 's, A: Animation> AnimationController<'w, 's, A> {
         self
     }
 
+    /// Reset all animations of this type, which will re-read all configurations
     pub fn reset_all(&mut self) -> &mut Self {
         for (animation, mut state) in self.animations.iter_mut() {
             state.reset(animation.configuration().into());
@@ -701,6 +698,8 @@ impl<'w, 's, A: Animation> AnimationController<'w, 's, A> {
         self
     }
 
+    /// Cause the specified animation to finish
+    /// This is subject to tick system timing glitches, so might not land on exactly the last frame
     pub fn finish(&mut self, entity: Entity) -> &mut Self {
         if let Ok((_, mut state)) = self.animations.get_mut(entity) {
             state.finish();
@@ -708,6 +707,8 @@ impl<'w, 's, A: Animation> AnimationController<'w, 's, A> {
         self
     }
 
+    /// Cause all animations of this type to finish
+    /// This is subject to tick system timing glitches, so might not land on exactly the last frame
     pub fn finish_all(&mut self) -> &mut Self {
         for (_, mut state) in self.animations.iter_mut() {
             state.finish();
@@ -716,7 +717,8 @@ impl<'w, 's, A: Animation> AnimationController<'w, 's, A> {
     }
 }
 
-impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
+impl<'w, 's, A: Animation> AnimationController<'w, 's, A> {
+    /// Query the finished state of the specified animation, if present
     pub fn finished(&self, entity: Entity) -> Option<bool> {
         self.animations
             .get(entity)
@@ -724,10 +726,13 @@ impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
             .map(|(_, state)| state.finished)
     }
 
+    /// Query if all animations of this type are finished. Will return `true` if
+    /// there are no animations
     pub fn all_finished(&self) -> bool {
         self.animations.iter().all(|(_, state)| state.finished)
     }
 
+    /// Retrieve a copy of the state of the specified animation, if present
     pub fn state(&self, entity: Entity) -> Option<AnimationState> {
         self.animations
             .get(entity)
@@ -735,6 +740,7 @@ impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
             .map(|(_, state)| state.state)
     }
 
+    /// Retrieve copies of the states of all animations of this type
     pub fn states(&self) -> Vec<AnimationState> {
         self.animations
             .iter()
@@ -742,6 +748,7 @@ impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
             .collect()
     }
 
+    /// Flip the `paused` state of the specified animation
     pub fn flip_pause(&mut self, entity: Entity) -> &mut Self {
         if let Ok((_, mut state)) = self.animations.get_mut(entity) {
             state.paused = !state.paused;
@@ -749,6 +756,7 @@ impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
         self
     }
 
+    /// Pause the specified animation
     pub fn pause(&mut self, entity: Entity) -> &mut Self {
         if let Ok((_, mut state)) = self.animations.get_mut(entity) {
             state.paused = true;
@@ -756,6 +764,7 @@ impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
         self
     }
 
+    /// Unpause the specified animation
     pub fn unpause(&mut self, entity: Entity) -> &mut Self {
         if let Ok((_, mut state)) = self.animations.get_mut(entity) {
             state.paused = false;
@@ -763,6 +772,7 @@ impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
         self
     }
 
+    /// Flip the `paused` state of all animations of this type
     pub fn flip_pause_all(&mut self) -> &mut Self {
         for (_, mut state) in self.animations.iter_mut() {
             state.paused = !state.paused;
@@ -770,6 +780,7 @@ impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
         self
     }
 
+    /// Pause all animations of this type
     pub fn pause_all(&mut self) -> &mut Self {
         for (_, mut state) in self.animations.iter_mut() {
             state.paused = true;
@@ -777,6 +788,7 @@ impl<'w, 's, A: Component> AnimationController<'w, 's, A> {
         self
     }
 
+    /// Unpause all animations of this type
     pub fn unpause_all(&mut self) -> &mut Self {
         for (_, mut state) in self.animations.iter_mut() {
             state.paused = false;

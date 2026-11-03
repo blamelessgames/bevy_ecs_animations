@@ -74,6 +74,15 @@ impl ReadyLetter {
     }
 }
 
+// serves as a test for the animation macro
+#[animation(
+    config =
+     duration(Self::DURATION)
+        // each letter has a slightly longer delay than the letter before
+        .delay_by(self.delay())
+        .remove_nothing(),
+    schedule = FixedUpdate
+)]
 fn tick_ready_letter(
     mut ready_letters: Query<(
         &ReadyLetter,
@@ -104,19 +113,6 @@ fn tick_ready_letter(
     }
 }
 
-impl Animation for ReadyLetter {
-    fn configuration(&self) -> impl Into<AnimationConfiguration> {
-        AnimationConfiguration::from(Self::DURATION)
-            // each letter has a slightly longer delay than the letter before
-            .delay_by(self.delay())
-            .remove_nothing()
-    }
-
-    fn system() -> (impl ScheduleLabel, TickSystemConfigs) {
-        (Update, tick_ready_letter.into_configs())
-    }
-}
-
 fn startup(mut commands: Commands) {
     commands.spawn((
         Camera2d,
@@ -132,6 +128,7 @@ fn startup(mut commands: Commands) {
 #[derive(Component)]
 struct PleaseSpawnReady;
 
+// if you want to do something weird with the system, you can define the trait yourself
 impl Animation for PleaseSpawnReady {
     fn configuration(&self) -> impl Into<AnimationConfiguration> {
         AnimationConfiguration::from(0.5).despawn_entity()
@@ -193,93 +190,3 @@ fn please_spawn_ready(_: On<AnimationFinished<PleaseSpawnReady>>, mut commands: 
         ))),
     ));
 }
-
-/*
-[
-    AnimationState {
-        elapsed: 1.0999999,
-        last_dt: 0.0075013638,
-        repetitions_remaining: 0,
-        finished: true,
-        paused: false,
-        configuration: AnimationConfiguration {
-            duration: 1.0999999,
-            start: 0.0,
-            delay: 0.0,
-            mode: Forward,
-            repetitions: 1,
-            paused: false,
-            events: true,
-            removal: Nothing,
-        },
-    },
-    AnimationState {
-        elapsed: 1.0999999,
-        last_dt: 0.0,
-        repetitions_remaining: 1,
-        finished: false,
-        paused: false,
-        configuration: AnimationConfiguration {
-            duration: 1.0999999,
-            start: 0.0,
-            delay: 0.6,
-            mode: Forward,
-            repetitions: 1,
-            paused: false,
-            events: true,
-            removal: Nothing,
-        },
-    },
-    AnimationState {
-        elapsed: 1.0999999,
-        last_dt: 0.0,
-        repetitions_remaining: 1,
-        finished: false,
-        paused: false,
-        configuration: AnimationConfiguration {
-            duration: 1.0999999,
-            start: 0.0,
-            delay: 0.15,
-            mode: Forward,
-            repetitions: 1,
-            paused: false,
-            events: true,
-            removal: Nothing,
-        },
-    },
-    AnimationState {
-        elapsed: 1.0999999,
-        last_dt: 0.0,
-        repetitions_remaining: 1,
-        finished: false,
-        paused: false,
-        configuration: AnimationConfiguration {
-            duration: 1.0999999,
-            start: 0.0,
-            delay: 0.3,
-            mode: Forward,
-            repetitions: 1,
-            paused: false,
-            events: true,
-            removal: Nothing,
-        },
-    },
-    AnimationState {
-        elapsed: 1.0999999,
-        last_dt: 0.0,
-        repetitions_remaining: 1,
-        finished: false,
-        paused: false,
-        configuration: AnimationConfiguration {
-            duration: 1.0999999,
-            start: 0.0,
-            delay: 0.45000002,
-            mode: Forward,
-            repetitions: 1,
-            paused: false,
-            events: true,
-            removal: Nothing,
-        },
-    },
-]
-*/
