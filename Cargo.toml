@@ -1,6 +1,6 @@
 [package]
 name = "bevy_ecs_animations"
-version = "0.20.1-dev"
+version = "0.20.2-dev"
 edition = "2024"
 authors = ["BlamelessGames"]
 description = "An ECS-first approach to procedural animation in Bevy."
@@ -21,7 +21,7 @@ bevy_time = { version = "0.20", default-features = false }
 
 bevy_curve = { version = "0.20", default-features = false, optional = true }
 bevy_math = { version = "0.20", default-features = false, optional = true }
-bevy_ecs_animations_macros = { path = "macros", version = "0.20.1-dev" }
+bevy_ecs_animations_macros = { path = "macros", version = "0.20.2-dev" }
 
 [dev-dependencies]
 bevy = { version = "0.20", features = ["debug"] }
