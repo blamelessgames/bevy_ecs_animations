@@ -2,6 +2,14 @@
 name = "bevy_ecs_animations_macros"
 version = "0.20.1"
 edition = "2024"
+authors = ["BlamelessGames"]
+description = "Macros for bevy_ecs_animations."
+repository = "https://github.com/blamelessgames/bevy_ecs_animations"
+license = "MIT OR Apache-2.0"
+readme = "../README.md"
+rust-version = "1.97.1"
+documentation = "https://docs.rs/bevy_ecs_animations"
+homepage = "https://github.com/blamelessgames/bevy_ecs_animations"
 
 [lib]
 proc-macro = true
