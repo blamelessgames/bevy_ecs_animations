@@ -83,12 +83,14 @@ pub use config::*;
 /// If you'd prefer to avoid insertion and removal costs for the `Tick` component, see
 /// [`PersistentTick`].
 ///
-/// See also [`animation`](super::animation) to automatically implement this trait for most cases
+/// The [`animation`](super::animation) macro can automatically implement this trait
+/// for most cases
 pub trait Animation: Component + 'static {
     /// Configuration for the animation's tick system, which can be any valid Bevy system.
     ///
     /// Your system will be scheduled between this plugin's internal systems, one that prepares
-    /// your tick and one that clean things up.
+    /// your tick and one that clean things up, and all systems will be added to a type-specific
+    /// [`AnimationSystems`] [`SystemSet`] that is available for ordering relative to them.
     ///
     /// In a generic context the syntax is a little odd but bearable, you need to explicitly
     /// call [`into_configs`](bevy_ecs::schedule::IntoScheduleConfigs::into_configs) on your
@@ -276,7 +278,7 @@ impl AnimationAppExt for App {
     }
 }
 
-/// The system set containing all the systems associated to an [`Animation`] type,
+/// The [`SystemSet`] containing all the systems associated to an [`Animation`] type,
 /// exposed for relative ordering
 pub struct AnimationSystems<A: Animation>(PhantomData<fn() -> A>);
 
