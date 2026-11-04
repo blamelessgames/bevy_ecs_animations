@@ -1,6 +1,6 @@
 [package]
 name = "bevy_ecs_animations_macros"
-version = "0.20.1-dev"
+version = "0.20.1"
 edition = "2024"
 
 [lib]
