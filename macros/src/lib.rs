@@ -86,10 +86,10 @@ pub fn animation(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 fn extract_animation_type(sig: &Signature) -> syn::Result<Type> {
     for arg in &sig.inputs {
-        if let FnArg::Typed(PatType { ty, .. }) = arg {
-            if let Some(found) = find_tick_in_type(ty) {
-                return Ok(found);
-            }
+        if let FnArg::Typed(PatType { ty, .. }) = arg
+            && let Some(found) = find_tick_in_type(ty)
+        {
+            return Ok(found);
         }
     }
     Err(syn::Error::new_spanned(
@@ -110,26 +110,29 @@ fn find_tick_in_type(ty: &Type) -> Option<Type> {
             return find_tick_in_type(elem);
         }
 
-        Type::Path(TypePath { qself: None, path }) => {
+        Type::Path(TypePath {
+            qself: None,
+            path,
+            attrs: _,
+        }) => {
             let last = path.segments.last()?;
 
             // Found a tick component
-            if last.ident == "Tick" || last.ident == "PersistentTick" {
-                if let PathArguments::AngleBracketed(args) = &last.arguments {
-                    if let Some(GenericArgument::Type(t)) = args.args.first() {
-                        return Some(t.clone());
-                    }
-                }
+            if (last.ident == "Tick" || last.ident == "PersistentTick")
+                && let PathArguments::AngleBracketed(args) = &last.arguments
+                && let Some(GenericArgument::Type(t)) = args.args.first()
+            {
+                return Some(t.clone());
             }
 
             // Recurse into other generic parameters (Single<...>, Query<...>, etc.)
             for seg in &path.segments {
                 if let PathArguments::AngleBracketed(ab) = &seg.arguments {
                     for arg in &ab.args {
-                        if let GenericArgument::Type(inner) = arg {
-                            if let Some(found) = find_tick_in_type(inner) {
-                                return Some(found);
-                            }
+                        if let GenericArgument::Type(inner) = arg
+                            && let Some(found) = find_tick_in_type(inner)
+                        {
+                            return Some(found);
                         }
                     }
                 }

@@ -125,5 +125,6 @@ pub use core::*;
 ///     // ...
 /// }
 /// ```
+#[cfg(feature = "macros")]
 #[doc(inline)]
 pub use bevy_ecs_animations_macros::animation;

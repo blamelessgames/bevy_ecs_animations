@@ -1,12 +1,23 @@
 [package]
 name = "bevy_ecs_animations_macros"
-version = "0.20.2-dev"
-edition = "2024"
+description = "Macros for bevy_ecs_animations"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+exclude.workspace = true
 
 [lib]
 proc-macro = true
 
 [dependencies]
-darling = "0.23.0"
+darling = "0.24.1"
 quote = "1.0.46"
-syn = "2.0.119"
+syn = "3.0.9"
