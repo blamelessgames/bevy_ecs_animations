@@ -1,5 +1,5 @@
 [workspace]
-members = ["macros"]
+members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
@@ -16,6 +16,15 @@ documentation = "https://docs.rs/bevy_ecs_animations"
 homepage = "https://github.com/blamelessgames/bevy_ecs_animations"
 exclude = [".github/", "all.sh", "release.zsh"]
 
+[workspace.dependencies]
+bevy_app = { version = "0.20", default-features = false }
+bevy_ecs = { version = "0.20", default-features = false }
+bevy_time = { version = "0.20", default-features = false }
+bevy_curve = { version = "0.20", default-features = false }
+bevy_math = { version = "0.20", default-features = false }
+bevy = { version = "0.20" }
+float_eq = "1.0.1"
+
 [package]
 name = "bevy_ecs_animations"
 description = "An ECS-first approach to procedural animation in Bevy."
@@ -31,19 +40,19 @@ rust-version.workspace = true
 documentation.workspace = true
 homepage.workspace = true
 exclude.workspace = true
+build = false
 
 [dependencies]
-
-bevy_app = { version = "0.20", default-features = false }
-bevy_ecs = { version = "0.20", default-features = false }
-bevy_time = { version = "0.20", default-features = false }
-bevy_ecs_animations_macros = { path = "macros", optional = true }
-bevy_curve = { version = "0.20", default-features = false, optional = true }
-bevy_math = { version = "0.20", default-features = false, optional = true }
+bevy_app.workspace = true
+bevy_ecs.workspace = true
+bevy_time.workspace = true
+bevy_ecs_animations_macros = { path = "crates/macros", optional = true }
+bevy_curve = { workspace = true, optional = true }
+bevy_math = { workspace = true, optional = true }
 
 [dev-dependencies]
-bevy = { version = "0.20", features = ["debug"] }
-float_eq = "1.0.1"
+bevy = { workspace = true, features = ["debug"] }
+float_eq.workspace = true
 
 [features]
 default = ["std", "combinators", "macros"]

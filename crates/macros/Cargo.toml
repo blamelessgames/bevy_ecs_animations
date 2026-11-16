@@ -13,6 +13,7 @@ rust-version.workspace = true
 documentation.workspace = true
 homepage.workspace = true
 exclude.workspace = true
+build = false
 
 [lib]
 proc-macro = true
