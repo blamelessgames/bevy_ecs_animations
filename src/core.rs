@@ -1,4 +1,5 @@
 use std::{
+    any::{TypeId, type_name},
     fmt::Debug,
     hash::Hash,
     marker::PhantomData,
@@ -13,10 +14,12 @@ use bevy_ecs::{
     lifecycle::{Insert, Remove},
     observer::On,
     query::Has,
+    resource::Resource,
     schedule::{IntoScheduleConfigs, ScheduleConfigs, ScheduleLabel, SystemSet},
     system::{Commands, Query, Res, ScheduleSystem, SystemParam},
     world::{EntityWorldMut, World},
 };
+use bevy_platform::collections::HashSet;
 use bevy_time::Time;
 
 // bye bye, old
@@ -246,11 +249,21 @@ impl<A> Deref for PersistentTick<A> {
 /// A nice alias
 pub type TickSystemConfigs = ScheduleConfigs<ScheduleSystem>;
 
+#[derive(Resource)]
+struct AnimationRegistry(HashSet<TypeId>);
+
+impl Default for AnimationRegistry {
+    fn default() -> Self {
+        AnimationRegistry(HashSet::with_capacity(16))
+    }
+}
+
 /// Extends [`App`] with a registration function for [`Animation`]s, enabling the plugin
 /// to maintain a timeline for the system processing ticks
 pub trait AnimationAppExt {
-    /// Registers a [`Component`] that implements [`Animation`] with your app, which sets up the
-    /// ticking infrastructure
+    /// Registers a [`Component`] that implements [`Animation`] with your app, using the
+    /// default [`Time`] context for the configured schedule to create ticking systems
+    ///
     /// ```
     /// use bevy::{prelude::*, ecs::schedule::ScheduleLabel};
     /// use bevy_ecs_animations::*;
@@ -270,11 +283,32 @@ pub trait AnimationAppExt {
     ///
     /// ```
     fn add_animation<A: Animation>(&mut self) -> &mut Self;
+
+    /// Registers a [`Component`] that implements [`Animation`] with your app, using the
+    /// supplied [`Time`] context for the configured schedule to create ticking systems
+    fn add_animation_in_context<A: Animation, C: Default + Send + Sync + 'static>(
+        &mut self,
+    ) -> &mut Self;
 }
 
 impl AnimationAppExt for App {
     fn add_animation<A: Animation>(&mut self) -> &mut Self {
-        self.add_plugins(AnimationPlugin::<A>::default())
+        self.add_animation_in_context::<A, ()>()
+    }
+
+    fn add_animation_in_context<A: Animation, C: Default + Send + Sync + 'static>(
+        &mut self,
+    ) -> &mut Self {
+        if !self
+            .world_mut()
+            .get_resource_or_init::<AnimationRegistry>()
+            .0
+            .insert(TypeId::of::<A>())
+        {
+            panic!("Animation \"{}\" was already registered", type_name::<A>());
+        }
+
+        self.add_plugins(AnimationPlugin::<A, C>::default())
     }
 }
 
@@ -323,9 +357,12 @@ impl<A: Animation> Hash for AnimationSystems<A> {
 }
 
 #[derive(Copy, Clone)]
-struct AnimationPlugin<A: Animation>(PhantomData<fn() -> A>);
+struct AnimationPlugin<A: Animation, C: Default + Send + Sync + 'static>(
+    PhantomData<fn() -> A>,
+    PhantomData<fn() -> C>,
+);
 
-impl<A: Animation> AnimationPlugin<A> {
+impl<A: Animation, C: Default + Send + Sync + 'static> AnimationPlugin<A, C> {
     fn ticker(
         mut animations: Query<(
             Entity,
@@ -334,7 +371,7 @@ impl<A: Animation> AnimationPlugin<A> {
             Has<PersistentTick<A>>,
         )>,
         mut commands: Commands,
-        time: Res<Time>,
+        time: Res<Time<C>>,
     ) {
         for (entity, mut state, has_tick, has_persistent_tick) in animations.iter_mut() {
             if let Some(tick) = state.tick(time.delta_secs()) {
@@ -416,21 +453,21 @@ impl<A: Animation> AnimationPlugin<A> {
     }
 }
 
-impl<A: Animation> Default for AnimationPlugin<A> {
+impl<A: Animation, C: Default + Send + Sync + 'static> Default for AnimationPlugin<A, C> {
     fn default() -> Self {
-        Self(PhantomData)
+        Self(PhantomData, PhantomData)
     }
 }
 
-impl<A: Animation> Plugin for AnimationPlugin<A> {
+impl<A: Animation, C: Default + Send + Sync + 'static> Plugin for AnimationPlugin<A, C> {
     fn build(&self, app: &mut App) {
         let (schedule, tick_system) = A::system();
         app.add_systems(
             schedule,
             (
-                AnimationPlugin::<A>::ticker,
+                AnimationPlugin::<A, C>::ticker,
                 tick_system,
-                AnimationPlugin::<A>::post_tick,
+                AnimationPlugin::<A, C>::post_tick,
             )
                 .chain()
                 .in_set(AnimationSystems::<A>::default()),

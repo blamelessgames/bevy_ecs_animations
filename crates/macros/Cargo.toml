@@ -11,7 +11,6 @@ categories.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 documentation.workspace = true
-homepage.workspace = true
 exclude.workspace = true
 build = false
 
@@ -19,6 +18,5 @@ build = false
 proc-macro = true
 
 [dependencies]
-darling = "0.24.1"
 quote = "1.0.46"
 syn = "3.0.9"

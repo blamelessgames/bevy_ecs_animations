@@ -1,14 +1,16 @@
 # Changes
 
 ### 0.20.2
+The time and precision release!
+- added a registration variant to specify the `Time` context used by an animation type. You can run your animation on whichever clock you desire, regardless of the default context of the schedule. Or keep using the default.
 - made the macros crate an optional, default feature. if you are both `no-default-features` and using the macro, you'll need to add the `macros` feature
 - added release machinery for lowered update cycle friction so i don't have to work much to keep this up to date with bevy
 
 ### 0.20.1
 This release includes a few new features to enhance the functionality and ease the use of the crate, as well as some general improvements to the code and documentation
 - new attribute macro to define the `Animation` implementation
-- PersistentTick, to avoid archetype changes if desired
-- Added a per-animation type SystemSet (AnimationSystems), exposed for ordering
+- `PersistentTick`, to avoid archetype changes if desired
+- Added a per-animation type `SystemSet` (`AnimationSystems`), exposed for ordering
 - some internal improvements to ticking
 - doc fixes
 - updated MSRV to 1.97.1, missed from the bevy update

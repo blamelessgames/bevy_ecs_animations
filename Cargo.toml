@@ -13,12 +13,12 @@ categories = ["game-development", "graphics"]
 readme = "README.md"
 rust-version = "1.97.1"
 documentation = "https://docs.rs/bevy_ecs_animations"
-homepage = "https://github.com/blamelessgames/bevy_ecs_animations"
 exclude = [".github/", "all.sh", "release.zsh"]
 
 [workspace.dependencies]
 bevy_app = { version = "0.20", default-features = false }
 bevy_ecs = { version = "0.20", default-features = false }
+bevy_platform = { version = "0.20", default-features = false }
 bevy_time = { version = "0.20", default-features = false }
 bevy_curve = { version = "0.20", default-features = false }
 bevy_math = { version = "0.20", default-features = false }
@@ -38,13 +38,13 @@ categories.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 documentation.workspace = true
-homepage.workspace = true
 exclude.workspace = true
 build = false
 
 [dependencies]
 bevy_app.workspace = true
 bevy_ecs.workspace = true
+bevy_platform.workspace = true
 bevy_time.workspace = true
 bevy_ecs_animations_macros = { path = "crates/macros", optional = true }
 bevy_curve = { workspace = true, optional = true }
