@@ -4,6 +4,7 @@ use std::{
     hash::Hash,
     marker::PhantomData,
     ops::{Deref, DerefMut},
+    time::Duration,
 };
 
 use bevy_app::{App, Plugin};
@@ -172,6 +173,10 @@ pub struct Tick<A> {
     pub dt: f32,
     /// t, scaled to [0, 1]
     pub normalized_t: f32,
+    /// current spot on the timeline as a [`Duration`]
+    pub time: Duration,
+    /// delta time from previous frame [`Duration`]
+    pub delta: Duration,
     /// current repetitions, 1-based
     pub repetition: u32,
     finished: bool,
@@ -373,8 +378,9 @@ impl<A: Animation, C: Default + Send + Sync + 'static> AnimationPlugin<A, C> {
         mut commands: Commands,
         time: Res<Time<C>>,
     ) {
+        let time = time.as_generic();
         for (entity, mut state, has_tick, has_persistent_tick) in animations.iter_mut() {
-            if let Some(tick) = state.tick(time.delta_secs()) {
+            if let Some(tick) = state.tick(&time) {
                 if has_persistent_tick {
                     commands.entity(entity).insert(PersistentTick(Some(tick)));
                 } else {
@@ -517,24 +523,21 @@ fn animation_repeated<A: Animation>(entity: Entity) -> AnimationRepeated<A> {
 /// The state of the animation. Users are free to inspect it!
 #[derive(Debug, Clone, Copy)]
 pub struct AnimationState {
-    elapsed: f32,
-    // last_dt: f32,
+    elapsed: Duration,
     repetitions_remaining: u32,
     finished: bool,
     paused: bool,
-    configuration: AnimationConfiguration,
+    configuration: ResolvedConfiguration,
 }
 
 impl Default for AnimationState {
     fn default() -> Self {
         Self {
-            elapsed: 0.0,
-            // last_dt: 0.0,
+            elapsed: Duration::ZERO,
             repetitions_remaining: 0,
             finished: false,
             paused: false,
-            // duration can't be zero. this never gets used anyway
-            configuration: (1.0).into(),
+            configuration: duration(0.0).resolve(),
         }
     }
 }
@@ -545,14 +548,14 @@ impl AnimationState {
         if self.repetitions_remaining == 0 {
             self.finished = true;
         } else {
-            self.elapsed = 0.0;
+            self.elapsed = Duration::ZERO;
             //self.last_dt = 0.0;
         }
     }
 
     /// Wlapsed time of the animation. This always counts up even when the animation counts down.
     /// this is accumulated from the tick system's contextual [`Time`] resource
-    pub const fn elapsed(&self) -> f32 {
+    pub const fn elapsed(&self) -> Duration {
         self.elapsed
     }
 
@@ -588,11 +591,11 @@ struct InternalAnimationState<A> {
     /// the public part of the state
     state: AnimationState,
     /// the real elapsed timer outside delays
-    total_elapsed: f32,
+    total_elapsed: Duration,
     /// if the animation just repeated
     just_repeated: bool,
     /// saving divisions in every frame
-    inv_duration: f32,
+    inv_duration: f64,
     _animation: PhantomData<fn() -> A>,
 }
 
@@ -614,7 +617,7 @@ impl<A> Default for InternalAnimationState<A> {
     fn default() -> Self {
         InternalAnimationState {
             state: Default::default(),
-            total_elapsed: 0.0,
+            total_elapsed: Duration::ZERO,
             just_repeated: false,
             inv_duration: 0.0,
             _animation: PhantomData,
@@ -640,10 +643,11 @@ impl<A> InternalAnimationState<A> {
     }
 
     fn reset(&mut self, configuration: AnimationConfiguration) {
-        self.total_elapsed = 0.0;
+        let configuration = configuration.resolve();
+        self.total_elapsed = Duration::ZERO;
         self.just_repeated = false;
         self.state = AnimationState {
-            elapsed: 0.0,
+            elapsed: Duration::ZERO,
             //last_dt: 0.0,
             repetitions_remaining: configuration.repetitions,
             finished: configuration.repetitions == 0,
@@ -651,21 +655,22 @@ impl<A> InternalAnimationState<A> {
             configuration,
         };
         // duration is always finite and positive so this is safe
-        self.inv_duration = 1.0 / configuration.duration;
+        self.inv_duration = configuration.duration.as_secs_f64().recip();
     }
 
     fn finish(&mut self) {
         // if you're running at more than 1000 fps you're gonna get a few frames which seems fine
-        self.state.elapsed =
-            (self.state.configuration.duration + self.state.configuration.start) - 0.001;
+        self.state.elapsed = (self.state.configuration.duration + self.state.configuration.start)
+            - Duration::from_millis(1);
         self.state.repetitions_remaining = 0;
     }
 }
 
 impl<A: Animation> InternalAnimationState<A> {
-    fn tick(&mut self, dt_in: f32) -> Option<Tick<A>> {
+    fn tick(&mut self, time: &Time) -> Option<Tick<A>> {
+        let delta_in = time.delta();
         // paused and finished animations do nothing
-        if self.state.paused || self.state.finished || dt_in <= 0.0 {
+        if self.state.paused || self.state.finished || delta_in <= Duration::ZERO {
             return None;
         }
 
@@ -673,34 +678,42 @@ impl<A: Animation> InternalAnimationState<A> {
         // return until we've sunk it all, be sure to account for leftover dt
         // this behavior may become configurable
         let in_delay = self.total_elapsed < self.configuration.delay;
-        self.total_elapsed += dt_in;
+        self.total_elapsed += delta_in;
 
-        let dt = if in_delay && self.total_elapsed <= self.configuration.delay {
+        let delta = if in_delay && self.total_elapsed <= self.configuration.delay {
             return None;
         } else if in_delay {
             self.total_elapsed - self.configuration.delay
         } else {
-            dt_in
+            delta_in
         };
 
         // now we get to  ask configuration for what really happened!
-        let Some(AnimationTickState { t, dt, finished }) =
-            self.state.configuration.t(self.state.elapsed, dt)
+        let Some(AnimationTickState {
+            time,
+            delta,
+            finished,
+        }) = self.state.configuration.t(self.state.elapsed, delta)
         else {
             // if None, we're outside the ticking range, just accumulate
             // self.state.last_dt = dt;
-            self.state.elapsed += dt;
+            self.state.elapsed += delta;
             return None;
         };
         // otherwise accumulate what might be trimmed
         // self.state.last_dt = dt;
-        self.state.elapsed += dt;
-        let normalized_t = (t - self.configuration.start) * self.inv_duration;
+        self.state.elapsed += delta;
+        let t = time.as_secs_f32();
+        let dt = delta.as_secs_f32();
+        let normalized_t =
+            ((time - self.configuration.start).as_secs_f64() * self.inv_duration) as f32;
 
         Some(Tick {
             t,
             dt,
             normalized_t,
+            time,
+            delta,
             repetition: self.state.repetition(),
             finished,
             _animation: PhantomData,
@@ -709,8 +722,8 @@ impl<A: Animation> InternalAnimationState<A> {
 }
 
 struct AnimationTickState {
-    t: f32,
-    dt: f32,
+    time: Duration,
+    delta: Duration,
     finished: bool,
 }
 

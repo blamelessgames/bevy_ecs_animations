@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::core::AnimationTickState;
 
 /// Encapsulates the configuration for an animation. Construct using the [From]
@@ -93,61 +95,26 @@ use crate::core::AnimationTickState;
 #[derive(Debug, Copy, Clone)]
 pub struct AnimationConfiguration {
     /// second to count off before ticking the timeline. happens before any repetitions
-    pub(super) delay: f32,
+    delay: TimeValue,
     /// seconds to tick off the timeline before starting the animation
-    pub(super) start: f32,
+    start: TimeValue,
     /// total duration of the animation in seconds, starts ticking after delay
-    pub(super) duration: f32,
+    duration: TimeValue,
     /// set forward or reverse
-    pub(super) mode: PlaybackMode,
+    mode: PlaybackMode,
     /// total number of times to run the animation. delay
-    pub(super) repetitions: u32,
+    repetitions: u32,
     /// set to start the animation in the paused state
-    pub(super) paused: bool,
+    paused: bool,
     /// whether to trigger events
-    pub(super) events: bool,
+    events: bool,
     /// behavior for cleanup
-    pub(super) removal: RemovalOptions,
+    removal: RemovalOptions,
 }
 
 impl From<f32> for AnimationConfiguration {
     fn from(duration: f32) -> Self {
         Self::duration(duration)
-    }
-}
-
-impl AnimationConfiguration {
-    /// handles the logic of turning last frame's elapsed time + this frame's dt into t and dt values
-    /// for the animation's tick method, and also determines if it finished, or if there's no reason
-    /// to tick
-    pub(super) const fn t(&self, elapsed: f32, dt: f32) -> Option<AnimationTickState> {
-        let start = self.start;
-        let end = start + self.duration;
-        let now = elapsed + dt;
-        let (produced_now, produced_end) = match self.mode {
-            PlaybackMode::Forward => (now, end),
-            PlaybackMode::Reverse => ((end - elapsed) + start - dt, start),
-        };
-
-        // if it's over, say so
-        if now >= end {
-            // adjust the dt
-            Some(AnimationTickState {
-                t: produced_end,
-                dt: end - elapsed,
-                finished: true,
-            })
-        // if its still before the start, say so
-        } else if now < start {
-            None
-        // otherwise everything is great!
-        } else {
-            Some(AnimationTickState {
-                t: produced_now,
-                dt,
-                finished: false,
-            })
-        }
     }
 }
 
@@ -158,7 +125,7 @@ pub const fn forever() -> AnimationConfiguration {
     AnimationConfiguration::forever()
 }
 
-/// A helper because writing `AnimationConfiguration::duration()`
+/// Common case helper because writing `AnimationConfiguration::duration()`
 /// gets old and (10.0).into() feels off
 #[inline]
 pub const fn duration(duration: f32) -> AnimationConfiguration {
@@ -171,7 +138,7 @@ impl AnimationConfiguration {
     /// *technically nowhere near forever
     #[inline]
     pub const fn forever() -> Self {
-        Self::duration(3_600.0).repeat(u32::MAX)
+        Self::duration_time(Duration::from_secs(3600)).repeat(u32::MAX)
     }
 
     /// Create a new configuration with a duration.
@@ -180,13 +147,47 @@ impl AnimationConfiguration {
     #[inline]
     pub const fn duration(duration: f32) -> Self {
         assert!(
-            duration.is_finite() && duration > 0.0,
-            "Duration must be finite and positive"
+            duration.is_finite() && duration >= 0.0,
+            "Duration must be finite and cannot be negative"
         );
         Self {
-            duration,
-            start: 0.0,
-            delay: 0.0,
+            duration: TimeValue::F32(duration),
+            start: TimeValue::Duration(Duration::ZERO),
+            delay: TimeValue::Duration(Duration::ZERO),
+            mode: PlaybackMode::Forward,
+            repetitions: 1,
+            paused: false,
+            events: true,
+            removal: RemovalOptions::Default,
+        }
+    }
+    /// Create a new configuration with a duration.
+    ///
+    /// Panics if duration is not finite and positive.
+    #[inline]
+    pub const fn duration_f64(duration: f64) -> Self {
+        assert!(
+            duration.is_finite() && duration >= 0.0,
+            "Duration must be finite and cannot be negative"
+        );
+        Self {
+            duration: TimeValue::F64(duration),
+            start: TimeValue::Duration(Duration::ZERO),
+            delay: TimeValue::Duration(Duration::ZERO),
+            mode: PlaybackMode::Forward,
+            repetitions: 1,
+            paused: false,
+            events: true,
+            removal: RemovalOptions::Default,
+        }
+    }
+
+    /// Create a new configuration with a duration.
+    pub const fn duration_time(duration: Duration) -> Self {
+        Self {
+            duration: TimeValue::Duration(duration),
+            start: TimeValue::Duration(Duration::ZERO),
+            delay: TimeValue::Duration(Duration::ZERO),
             mode: PlaybackMode::Forward,
             repetitions: 1,
             paused: false,
@@ -206,19 +207,64 @@ impl AnimationConfiguration {
             start.is_finite() && start >= 0.0,
             "Start must be finite and cannot be negative"
         );
-        self.start = start;
+        self.start = TimeValue::F32(start);
+        self
+    }
+
+    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds.
+    ///
+    /// Defaults to 0.0
+    ///
+    /// Must be finite and cannot be negative.
+    #[inline]
+    pub const fn start_at_f64(mut self, start: f64) -> Self {
+        assert!(
+            start.is_finite() && start >= 0.0,
+            "Start must be finite and cannot be negative"
+        );
+        self.start = TimeValue::F64(start);
+        self
+    }
+
+    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds.
+    ///
+    /// Defaults to 0.0
+    #[inline]
+    pub const fn start_at_time(mut self, start: Duration) -> Self {
+        self.start = TimeValue::Duration(start);
         self
     }
 
     /// Seconds to "tick off" the timeline before it officially starts.
     ///
+    /// Must be finite and cannot be negative.
     #[inline]
     pub const fn delay_by(mut self, delay: f32) -> Self {
         assert!(
             delay.is_finite() && delay >= 0.0,
             "Delay must be finite and cannot be negative"
         );
-        self.delay = delay;
+        self.delay = TimeValue::F32(delay);
+        self
+    }
+
+    /// Seconds to "tick off" the timeline before it officially starts.
+    ///
+    /// Must be finite and cannot be negative.
+    #[inline]
+    pub const fn delay_by_f64(mut self, delay: f64) -> Self {
+        assert!(
+            delay.is_finite() && delay >= 0.0,
+            "Delay must be finite and cannot be negative"
+        );
+        self.delay = TimeValue::F64(delay);
+        self
+    }
+
+    /// Seconds to "tick off" the timeline before it officially starts.
+    #[inline]
+    pub const fn delay_by_time(mut self, delay: Duration) -> Self {
+        self.delay = TimeValue::Duration(delay);
         self
     }
 
@@ -288,6 +334,36 @@ impl AnimationConfiguration {
         self.removal = RemovalOptions::Nothing;
         self
     }
+
+    pub(super) fn resolve(&self) -> ResolvedConfiguration {
+        ResolvedConfiguration {
+            delay: self.delay.resolve(),
+            start: self.start.resolve(),
+            duration: self.duration.resolve(),
+            mode: self.mode,
+            repetitions: self.repetitions,
+            paused: self.paused,
+            events: self.events,
+            removal: self.removal,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum TimeValue {
+    F32(f32),
+    F64(f64),
+    Duration(Duration),
+}
+
+impl TimeValue {
+    fn resolve(&self) -> Duration {
+        match *self {
+            TimeValue::F32(secs) => Duration::from_secs_f32(secs),
+            TimeValue::F64(secs) => Duration::from_secs_f64(secs),
+            TimeValue::Duration(duration) => duration,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -307,4 +383,58 @@ pub(super) enum RemovalOptions {
     Entity,
     /// do nothing, default for persistent ticks
     Nothing,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub(super) struct ResolvedConfiguration {
+    /// time to count off before ticking the timeline. happens before any repetitions
+    pub(super) delay: Duration,
+    /// time to tick off the timeline before starting the animation
+    pub(super) start: Duration,
+    /// total duration of the animation, starts ticking after delay
+    pub(super) duration: Duration,
+    /// set forward or reverse
+    pub(super) mode: PlaybackMode,
+    /// total number of times to run the animation. delay
+    pub(super) repetitions: u32,
+    /// set to start the animation in the paused state
+    pub(super) paused: bool,
+    /// whether to trigger events
+    pub(super) events: bool,
+    /// behavior for cleanup
+    pub(super) removal: RemovalOptions,
+}
+
+impl ResolvedConfiguration {
+    /// handles the logic of turning last frame's elapsed time + this frame's dt into t and dt values
+    /// for the animation's tick method, and also determines if it finished, or if there's no reason
+    /// to tick
+    pub(super) fn t(&self, elapsed: Duration, dt: Duration) -> Option<AnimationTickState> {
+        let end = self.start + self.duration;
+        let now = elapsed + dt;
+        let (produced_now, produced_end) = match self.mode {
+            PlaybackMode::Forward => (now, end),
+            PlaybackMode::Reverse => ((end - elapsed) + self.start - dt, self.start),
+        };
+
+        // if it's over, say so
+        if now >= end {
+            // adjust the dt
+            Some(AnimationTickState {
+                time: produced_end,
+                delta: end - elapsed,
+                finished: true,
+            })
+        // if its still before the start, say so
+        } else if now < self.start {
+            None
+        // otherwise everything is great!
+        } else {
+            Some(AnimationTickState {
+                time: produced_now,
+                delta: dt,
+                finished: false,
+            })
+        }
+    }
 }
