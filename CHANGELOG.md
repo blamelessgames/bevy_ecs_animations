@@ -3,8 +3,8 @@
 ### 0.20.2
 The time and precision release!
 - added a registration variant to specify the `Time` context used by an animation type. You can run your animation on whichever clock you desire, regardless of the default context of the schedule
-- reworked ticking machinery to use `Duration` and added configuration and reporting support, for high-precision use
-- cleaned up use of `std`
+- reworked ticking machinery to use `Duration` and added configuration and reporting support, for high-precision use. This does mean that you may notice small (generally sub-millisecond) discrepancies in certain outputs from prior versions
+- cleaned up use of `std` in favor of `core`
 - made the macros crate an optional, default feature. if you are both `no-default-features` and using the macro, you'll need to add the `macros` feature
 - added release machinery for lowered update cycle friction so i don't have to work much to keep this up to date with bevy
 
