@@ -6,10 +6,14 @@
 
 An ECS approach to procedural animation in the Bevy engine
 
+## Deprecation notice!
+The `AnimationConfiguration::start_at` function has been renamed to `start_after`. In a future release, the `start_at` function
+will be repurposed to configure an absolute timestamp for starting the animation.
+
 ## What is it?
 This crate gives you a lightweight, opinionated timeline manager with minimal ceremony. You define a normal `Component` that implements the `Animation` trait, add it to the app with `add_animation`, and insert instances on entities you want to animate.
 
-While the animation is active, a Tick component is automatically added to the entity. Your system reads this Tick to know where you are in the timeline (via `t`, `normalized_t`, `dt`, and `repetition`).
+While the animation is active, a Tick component is automatically added to the entity. Your system reads this Tick to know where you are in the timeline (via `t`, `dt`, and so on).
 
 Everything else — what you animate, how you react to progress, easing, state machines, etc. — is up to you.
 
@@ -65,6 +69,7 @@ fn run_app() -> AppExit {
 - Bevy-friendly API - you write normal Bevy systems, control animation parameters directly
   from animation components, react by observing the entity, and interact using a system param
   or by issuing commands.
+- Configure animations to run on any Bevy clock
 - No restrictions on what properties or types can be animated, if you want to use a curve that
   produces `(UiTransform, TextColor)` to make some text pop we are here for it. If you want
   to target arbitrary entities from one tick system, you'll have to do the work to make that happen,
@@ -90,12 +95,13 @@ Version numbers are set up to track Bevy compatibility, but much like Bevy this 
 ## Cargo Features
 This plugin has an optional experimental module that offers const combinators that work with the `Curve` trait in bevy_math. It is currently activated by default, along with the `std` backend (glam). If you wish to use them with a different backend you'll have to disable default features first then re-enable. Combinators may move to separate library altogether, or vanish. Still not sure.
 
-|feature|description|
-|-|-|
-|combinators|experimental const combinators that work with Bevy's Curve trait|
-|std|Activate the `std` backend feature in bevy_math (glam)|
-|libm|Activate the `libm` backend feature in bevy_math|
-|nostd-libm|Activate the `nostd-libm` backend feature in bevy_math|
+|feature|description|default?|
+|-|-|-|
+|macros|Includes the helper macro crate|yes|
+|combinators|experimental const combinators that work with Bevy's Curve trait|yes|
+|std|Activate the `std` backend feature in bevy_math (glam)|yes|
+|libm|Activate the `libm` backend feature in bevy_math|no|
+|nostd-libm|Activate the `nostd-libm` backend feature in bevy_math|no|
 
 ## Why?
 I wanted to procedurally animate some text, and I found the Bevy animation plugin to be a little clunky for the task. I decided to make something that uses a different approach to creating animations, leaning into the Rust type system and the Bevy ECS, in particular with strongly-typed queries and influence over scheduling, so animation ticking systems can be parallelized. This plugin focuses on opinionated timeline management, and tries to leave everything else up to the user (with reasonable defaults).

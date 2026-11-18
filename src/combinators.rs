@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-use std::{
+use core::{
     marker::PhantomData,
     ops::{Add, Mul, Sub},
 };

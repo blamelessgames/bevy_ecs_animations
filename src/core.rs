@@ -1,4 +1,4 @@
-use std::{
+use core::{
     any::{TypeId, type_name},
     fmt::Debug,
     hash::Hash,
@@ -192,7 +192,7 @@ impl<A> Clone for Tick<A> {
 impl<A> Copy for Tick<A> {}
 
 impl<A> Debug for Tick<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Tick")
             .field("t", &self.t)
             .field("dt", &self.dt)
@@ -328,8 +328,8 @@ impl<A: Animation> SystemSet for AnimationSystems<A> {
 }
 
 impl<A: Animation> Debug for AnimationSystems<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", std::any::type_name::<AnimationSystems<A>>())
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", core::any::type_name::<AnimationSystems<A>>())
     }
 }
 
@@ -356,8 +356,8 @@ impl<A: Animation> Eq for AnimationSystems<A> {}
 impl<A: Animation> Copy for AnimationSystems<A> {}
 
 impl<A: Animation> Hash for AnimationSystems<A> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::any::type_name::<AnimationSystems<A>>().hash(state);
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        core::any::type_name::<AnimationSystems<A>>().hash(state);
     }
 }
 

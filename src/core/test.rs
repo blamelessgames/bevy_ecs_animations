@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, time::Duration};
+use ::core::{marker::PhantomData, time::Duration};
 
 use crate::{core::AnimationTickState, *};
 use bevy::{prelude::*, time::TimePlugin};

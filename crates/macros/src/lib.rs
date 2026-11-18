@@ -75,7 +75,7 @@ pub fn animation(attr: TokenStream, item: TokenStream) -> TokenStream {
                 (#schedule, #fn_name.into_configs())
             }
 
-            fn configuration(&self) -> impl ::std::convert::Into<::bevy_ecs_animations::AnimationConfiguration> {
+            fn configuration(&self) -> impl ::core::convert::Into<::bevy_ecs_animations::AnimationConfiguration> {
                 #config
             }
         }

@@ -1,6 +1,10 @@
 //! # bevy_ecs_animations
 //! An ECS approach to procedural animation in the Bevy engine
 //!
+//! ## Deprecation notice!
+//! The [`AnimationConfiguration::start_at`] function has been renamed to [`start_after`](AnimationConfiguration::start_after).
+//! In a future release, the `start_at` function will be repurposed to configure an absolute timestamp for starting the animation.
+//!
 //! ## What is it?
 //! This crate gives you a lightweight, opinionated **timeline manager** with minimal ceremony.
 //! You define a normal [`Component`](bevy_ecs::component::Component) that implements the [`Animation`] trait,
@@ -9,7 +13,7 @@
 //!
 //! While the animation is active, a [`Tick`] component is automatically added to the entity.
 //! Your system reads this `Tick` to know where you are in the timeline (via [`t`](Tick::t),
-//! [`normalized_t`](Tick::normalized_t), [`dt`](Tick::dt), and [`repetition`](Tick::repetition)).
+//! [`dt`](Tick::dt), and more).
 //!
 //! Everything else — what you animate, how you react to progress, easing, state machines, etc. — is up to you.
 //!
