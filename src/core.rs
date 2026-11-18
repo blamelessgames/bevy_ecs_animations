@@ -291,17 +291,17 @@ pub trait AnimationAppExt {
 
     /// Registers a [`Component`] that implements [`Animation`] with your app, using the
     /// supplied [`Time`] context for the configured schedule to create ticking systems
-    fn add_animation_in_context<A: Animation, C: Default + Send + Sync + 'static>(
+    fn add_animation_in_time_context<A: Animation, C: Default + Send + Sync + 'static>(
         &mut self,
     ) -> &mut Self;
 }
 
 impl AnimationAppExt for App {
     fn add_animation<A: Animation>(&mut self) -> &mut Self {
-        self.add_animation_in_context::<A, ()>()
+        self.add_animation_in_time_context::<A, ()>()
     }
 
-    fn add_animation_in_context<A: Animation, C: Default + Send + Sync + 'static>(
+    fn add_animation_in_time_context<A: Animation, C: Default + Send + Sync + 'static>(
         &mut self,
     ) -> &mut Self {
         if !self

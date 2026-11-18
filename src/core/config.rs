@@ -132,6 +132,20 @@ pub const fn duration(duration: f32) -> AnimationConfiguration {
     AnimationConfiguration::duration(duration)
 }
 
+/// Common case helper because writing `AnimationConfiguration::duration()`
+/// gets old and (10.0).into() feels off
+#[inline]
+pub const fn duration_f64(duration: f64) -> AnimationConfiguration {
+    AnimationConfiguration::duration_f64(duration)
+}
+
+/// Common case helper because writing `AnimationConfiguration::duration()`
+/// gets old and (10.0).into() feels off
+#[inline]
+pub const fn duration_time(duration: Duration) -> AnimationConfiguration {
+    AnimationConfiguration::duration_time(duration)
+}
+
 impl AnimationConfiguration {
     /// One hour, repeated 4,294,967,295 times
     ///
