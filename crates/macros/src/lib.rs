@@ -84,7 +84,7 @@ pub fn animation(attr: TokenStream, item: TokenStream) -> TokenStream {
     expanded.into()
 }
 
-fn extract_animation_type(sig: &Signature) -> syn::Result<Type> {
+fn extract_animation_type(sig: &Signature) -> syn::Result<&Type> {
     for arg in &sig.inputs {
         if let FnArg::Typed(PatType { ty, .. }) = arg
             && let Some(found) = find_tick_in_type(ty)
@@ -99,7 +99,7 @@ fn extract_animation_type(sig: &Signature) -> syn::Result<Type> {
     ))
 }
 
-fn find_tick_in_type(ty: &Type) -> Option<Type> {
+fn find_tick_in_type(ty: &Type) -> Option<&Type> {
     match ty {
         // We only care about &Tick<T> (immutable)
         Type::Reference(TypeReference {
@@ -122,7 +122,7 @@ fn find_tick_in_type(ty: &Type) -> Option<Type> {
                 && let PathArguments::AngleBracketed(args) = &last.arguments
                 && let Some(GenericArgument::Type(t)) = args.args.first()
             {
-                return Some(t.clone());
+                return Some(t);
             }
 
             // Recurse into other generic parameters (Single<...>, Query<...>, etc.)
