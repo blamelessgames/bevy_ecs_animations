@@ -32,7 +32,7 @@ fn startup(
 
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(3.0, 3.0, 3.0))),
-        MeshMaterial3d(materials.add(Color::from(GREEN))),
+        MeshMaterial3d(materials.add(Color::from(DODGER_BLUE))),
         XScale,
         YScale,
     ));
@@ -66,6 +66,7 @@ fn keys(keyboard: Res<ButtonInput<KeyCode>>, mut time: ResMut<Time<Virtual>>) {
 #[derive(Component)]
 struct XScale;
 
+// admittedly no real reason to be using `Duration` here, but you can!
 #[animation(
     config = duration_time(Duration::from_secs(u64::MAX))
 )]

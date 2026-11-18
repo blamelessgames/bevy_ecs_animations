@@ -660,7 +660,8 @@ impl<A> InternalAnimationState<A> {
 
     fn finish(&mut self) {
         // if you're running at more than 1000 fps you're gonna get a few frames which seems fine
-        self.state.elapsed = (self.state.configuration.duration + self.state.configuration.start)
+        self.state.elapsed = (self.state.configuration.duration
+            + self.state.configuration.start_after)
             - Duration::from_millis(1);
         self.state.repetitions_remaining = 0;
     }
@@ -706,7 +707,7 @@ impl<A: Animation> InternalAnimationState<A> {
         let t = time.as_secs_f32();
         let dt = delta.as_secs_f32();
         let normalized_t =
-            ((time - self.configuration.start).as_secs_f64() * self.inv_duration) as f32;
+            ((time - self.configuration.start_after).as_secs_f64() * self.inv_duration) as f32;
 
         Some(Tick {
             t,

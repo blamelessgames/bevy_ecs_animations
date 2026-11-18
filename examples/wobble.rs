@@ -67,10 +67,10 @@ enum Fade {
 #[animation(config = {
     match self {
         Fade::Out => duration(1.4)
-            .start_at(2.1)
+            .start_after(2.1)
             .play_in_reverse()
             .remove_nothing(),
-        Fade::In => duration(1.2).start_at(0.5),
+        Fade::In => duration(1.2).start_after(0.5),
     }
 })]
 fn tick_fade(

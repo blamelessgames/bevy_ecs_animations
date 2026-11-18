@@ -97,7 +97,7 @@ pub struct AnimationConfiguration {
     /// second to count off before ticking the timeline. happens before any repetitions
     delay: TimeValue,
     /// seconds to tick off the timeline before starting the animation
-    start: TimeValue,
+    start_after: TimeValue,
     /// total duration of the animation in seconds, starts ticking after delay
     duration: TimeValue,
     /// set forward or reverse
@@ -166,7 +166,7 @@ impl AnimationConfiguration {
         );
         Self {
             duration: TimeValue::F32(duration),
-            start: TimeValue::Duration(Duration::ZERO),
+            start_after: TimeValue::Duration(Duration::ZERO),
             delay: TimeValue::Duration(Duration::ZERO),
             mode: PlaybackMode::Forward,
             repetitions: 1,
@@ -186,7 +186,7 @@ impl AnimationConfiguration {
         );
         Self {
             duration: TimeValue::F64(duration),
-            start: TimeValue::Duration(Duration::ZERO),
+            start_after: TimeValue::Duration(Duration::ZERO),
             delay: TimeValue::Duration(Duration::ZERO),
             mode: PlaybackMode::Forward,
             repetitions: 1,
@@ -200,7 +200,7 @@ impl AnimationConfiguration {
     pub const fn duration_time(duration: Duration) -> Self {
         Self {
             duration: TimeValue::Duration(duration),
-            start: TimeValue::Duration(Duration::ZERO),
+            start_after: TimeValue::Duration(Duration::ZERO),
             delay: TimeValue::Duration(Duration::ZERO),
             mode: PlaybackMode::Forward,
             repetitions: 1,
@@ -210,42 +210,61 @@ impl AnimationConfiguration {
         }
     }
 
-    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds.
+    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds. Renamed to
+    /// [`start_after`](Self::start_after) because this will become an absolute time to start the animation in
+    /// a future release.
     ///
     /// Defaults to 0.0
     ///
     /// Must be finite and cannot be negative.
     #[inline]
-    pub const fn start_at(mut self, start: f32) -> Self {
-        assert!(
-            start.is_finite() && start >= 0.0,
-            "Start must be finite and cannot be negative"
-        );
-        self.start = TimeValue::F32(start);
-        self
+    #[deprecated(
+        since = "0.20.2",
+        note = "renamed to `start_after`, will become an absolute time to start the animation in a future release"
+    )]
+    pub const fn start_at(self, start: f32) -> Self {
+        self.start_after(start)
     }
 
-    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds.
+    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds. In other words,
+    /// the same effect as [`delay_by`](Self::delay_by) but after the time starts rather than before.
     ///
     /// Defaults to 0.0
     ///
     /// Must be finite and cannot be negative.
     #[inline]
-    pub const fn start_at_f64(mut self, start: f64) -> Self {
+    pub const fn start_after(mut self, start_after: f32) -> Self {
         assert!(
-            start.is_finite() && start >= 0.0,
+            start_after.is_finite() && start_after >= 0.0,
             "Start must be finite and cannot be negative"
         );
-        self.start = TimeValue::F64(start);
+        self.start_after = TimeValue::F32(start_after);
         self
     }
 
-    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds.
+    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds. In other words,
+    /// the same effect as [`delay_by_f64`](Self::delay_by_f64) but after the time starts rather than before.
+    ///
+    /// Defaults to 0.0
+    ///
+    /// Must be finite and cannot be negative.
+    #[inline]
+    pub const fn start_after_f64(mut self, start_after: f64) -> Self {
+        assert!(
+            start_after.is_finite() && start_after >= 0.0,
+            "Start must be finite and cannot be negative"
+        );
+        self.start_after = TimeValue::F64(start_after);
+        self
+    }
+
+    /// Set a start point on the animation's timeline when this animation begins ticking, in seconds. In other words,
+    /// the same effect as [`delay_by_time`](Self::delay_by_time) but after the time starts rather than before.
     ///
     /// Defaults to 0.0
     #[inline]
-    pub const fn start_at_time(mut self, start: Duration) -> Self {
-        self.start = TimeValue::Duration(start);
+    pub const fn start_after_time(mut self, start_after: Duration) -> Self {
+        self.start_after = TimeValue::Duration(start_after);
         self
     }
 
@@ -352,7 +371,7 @@ impl AnimationConfiguration {
     pub(super) fn resolve(&self) -> ResolvedConfiguration {
         ResolvedConfiguration {
             delay: self.delay.resolve(),
-            start: self.start.resolve(),
+            start_after: self.start_after.resolve(),
             duration: self.duration.resolve(),
             mode: self.mode,
             repetitions: self.repetitions,
@@ -386,7 +405,6 @@ pub(super) enum PlaybackMode {
     Reverse,
 }
 
-/// define
 #[derive(Debug, Copy, Clone)]
 pub(super) enum RemovalOptions {
     /// in default this depends on whether the user enabled persistent ticks
@@ -404,7 +422,7 @@ pub(super) struct ResolvedConfiguration {
     /// time to count off before ticking the timeline. happens before any repetitions
     pub(super) delay: Duration,
     /// time to tick off the timeline before starting the animation
-    pub(super) start: Duration,
+    pub(super) start_after: Duration,
     /// total duration of the animation, starts ticking after delay
     pub(super) duration: Duration,
     /// set forward or reverse
@@ -424,11 +442,11 @@ impl ResolvedConfiguration {
     /// for the animation's tick method, and also determines if it finished, or if there's no reason
     /// to tick
     pub(super) fn t(&self, elapsed: Duration, dt: Duration) -> Option<AnimationTickState> {
-        let end = self.start + self.duration;
+        let end = self.start_after + self.duration;
         let now = elapsed + dt;
         let (produced_now, produced_end) = match self.mode {
             PlaybackMode::Forward => (now, end),
-            PlaybackMode::Reverse => ((end - elapsed) + self.start - dt, self.start),
+            PlaybackMode::Reverse => ((end - elapsed) + self.start_after - dt, self.start_after),
         };
 
         // if it's over, say so
@@ -440,7 +458,7 @@ impl ResolvedConfiguration {
                 finished: true,
             })
         // if its still before the start, say so
-        } else if now < self.start {
+        } else if now < self.start_after {
             None
         // otherwise everything is great!
         } else {

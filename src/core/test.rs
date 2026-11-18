@@ -63,7 +63,7 @@ fn test_timekeeping() {
     );
     // this doesn't get called after it reports finished
 
-    let c = c.start_at(1.0);
+    let c = c.start_after(1.0);
     // should be None the whole first second
     test(c, Duration::ZERO, Duration::from_nanos(1102375), None);
     test(
