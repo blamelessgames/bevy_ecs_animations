@@ -18,5 +18,5 @@ build = false
 proc-macro = true
 
 [dependencies]
-quote = "1.0.46"
-syn = "3.0.9"
+quote.workspace = true
+syn.workspace = true

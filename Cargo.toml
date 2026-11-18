@@ -24,6 +24,8 @@ bevy_curve = { version = "0.20", default-features = false }
 bevy_math = { version = "0.20", default-features = false }
 bevy = { version = "0.20" }
 float_eq = "1.0.1"
+quote = { version = "1.0.47" }
+syn = { version = "3.0.10", default-features = false, features = ["full"] }
 
 [package]
 name = "bevy_ecs_animations"
