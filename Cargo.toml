@@ -46,7 +46,7 @@ bevy_app.workspace = true
 bevy_ecs.workspace = true
 bevy_platform.workspace = true
 bevy_time.workspace = true
-bevy_ecs_animations_macros = { path = "crates/macros", optional = true }
+bevy_ecs_animations_macros = { version = "0.20.2-dev", path = "crates/macros", optional = true }
 bevy_curve = { workspace = true, optional = true }
 bevy_math = { workspace = true, optional = true }
 
